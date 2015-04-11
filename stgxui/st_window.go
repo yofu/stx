@@ -178,7 +178,7 @@ func NewWindow(driver gxui.Driver, theme gxui.Theme, homedir string) *Window {
 			default:
 				return
 			case gxui.MouseButtonLeft:
-				return
+				stw.MoveOrRotate(ev)
 			case gxui.MouseButtonMiddle:
 				stw.MoveOrRotate(ev)
 			}
