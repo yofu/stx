@@ -113,6 +113,19 @@ func Text(canvas gxui.Canvas, font gxui.Font, x, y int, str string) {
 	canvas.DrawRunes(font, rs, os, gxui.White)
 }
 
+func (stw *Window) DrawFrameNode() gxui.Canvas {
+	canvas := stw.driver.CreateCanvas(gxmath.Size{W: stw.CanvasSize[0], H: stw.CanvasSize[1]})
+	pen := gxui.CreatePen(1, gxui.White)
+	font := stw.theme.DefaultFont()
+	stw.Frame.View.Set(1)
+	for _, n := range stw.Frame.Nodes {
+		stw.Frame.View.ProjectNode(n)
+		DrawNode(n, canvas, pen, font, stw.Frame.Show)
+	}
+	canvas.Complete()
+	return canvas
+}
+
 func (stw *Window) DrawFrame() gxui.Canvas {
 	canvas := stw.driver.CreateCanvas(gxmath.Size{W: stw.CanvasSize[0], H: stw.CanvasSize[1]})
 	pen := gxui.CreatePen(1, gxui.White)

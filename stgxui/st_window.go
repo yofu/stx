@@ -172,15 +172,26 @@ func NewWindow(driver gxui.Driver, theme gxui.Theme, homedir string) *Window {
 		stw.startX = ev.Point.X
 		stw.startY = ev.Point.Y
 	})
+	stw.draw.OnDoubleClick(func (ev gxui.MouseEvent) {
+		switch ev.Button {
+		case gxui.MouseButtonLeft:
+			fmt.Println("DOUBLE: LEFT", ev.Point.X, ev.Point.Y)
+		case gxui.MouseButtonMiddle:
+			stw.Frame.SetFocus(nil)
+			stw.RedrawNode()
+			stw.ShowCenter()
+		}
+	})
 	stw.draw.OnMouseMove(func (ev gxui.MouseEvent) {
 		if stw.Frame != nil {
 			switch stw.downkey {
 			default:
 				return
 			case gxui.MouseButtonLeft:
-				stw.MoveOrRotate(ev)
+				return
 			case gxui.MouseButtonMiddle:
 				stw.MoveOrRotate(ev)
+				stw.RedrawNode()
 			}
 		}
 	})
@@ -231,6 +242,58 @@ func NewWindow(driver gxui.Driver, theme gxui.Theme, homedir string) *Window {
 	stw.draw.SetCanvas(canvas)
 
 	return stw
+}
+
+func (stw *Window) Bbox() (xmin, xmax, ymin, ymax float64) {
+	if stw.Frame == nil || len(stw.Frame.Nodes) == 0 {
+		return 0.0, 0.0, 0.0, 0.0
+	}
+	var mins, maxs [2]float64
+	first := true
+	for _, j := range stw.Frame.Nodes {
+		if j.IsHidden(stw.Frame.Show) {
+			continue
+		}
+		if first {
+			for k := 0; k < 2; k++ {
+				mins[k] = j.Pcoord[k]
+				maxs[k] = j.Pcoord[k]
+			}
+			first = false
+		} else {
+			for k := 0; k < 2; k++ {
+				if j.Pcoord[k] < mins[k] {
+					mins[k] = j.Pcoord[k]
+				} else if maxs[k] < j.Pcoord[k] {
+					maxs[k] = j.Pcoord[k]
+				}
+			}
+		}
+	}
+	return mins[0], maxs[0], mins[1], maxs[1]
+}
+
+func (stw *Window) ShowAtCanvasCenter() {
+	for _, n := range stw.Frame.Nodes {
+		stw.Frame.View.ProjectNode(n)
+	}
+	xmin, xmax, ymin, ymax := stw.Bbox()
+	if xmax == xmin && ymax == ymin {
+		return
+	}
+	scale := math.Min(float64(stw.CanvasSize[0])/(xmax-xmin), float64(stw.CanvasSize[1])/(ymax-ymin)) * 0.9
+	if stw.Frame.View.Perspective {
+		stw.Frame.View.Dists[1] *= scale
+	} else {
+		stw.Frame.View.Gfact *= scale
+	}
+	stw.Frame.View.Center[0] = float64(stw.CanvasSize[0])*0.5 + scale*(stw.Frame.View.Center[0]-0.5*(xmax+xmin))
+	stw.Frame.View.Center[1] = float64(stw.CanvasSize[1])*0.5 + scale*(stw.Frame.View.Center[1]-0.5*(ymax+ymin))
+}
+
+func (stw *Window) ShowCenter() {
+	stw.ShowAtCanvasCenter()
+	stw.Redraw()
 }
 
 func (stw *Window) MoveOrRotate(ev gxui.MouseEvent) {
@@ -296,6 +359,12 @@ func (stw *Window) History(str string) {
 		return
 	}
 	stw.history.SetText(str)
+}
+
+func (stw *Window) RedrawNode() {
+	stw.draw.Canvas().Release()
+	canvas := stw.DrawFrameNode()
+	stw.draw.SetCanvas(canvas)
 }
 
 func (stw *Window) Redraw() {
