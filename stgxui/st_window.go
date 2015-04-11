@@ -233,10 +233,15 @@ func NewWindow(driver gxui.Driver, theme gxui.Theme, homedir string) *Window {
 	stw.dlg.AddChild(vsp)
 	stw.dlg.OnClose(driver.Terminate)
 
+	stw.SetCanvasSize()
+
 	stw.OpenFile("hiroba05.inp")
 	stw.Frame.Show.NodeCaption |= st.NC_NUM
 	stw.Frame.Show.ElemCaption |= st.EC_NUM
 	stw.Frame.Show.ElemCaption |= st.EC_SECT
+
+	stw.Frame.View.Center[0] = float64(stw.CanvasSize[0])*0.5
+	stw.Frame.View.Center[1] = float64(stw.CanvasSize[1])*0.5
 
 	canvas := stw.DrawFrame()
 	stw.draw.SetCanvas(canvas)
@@ -273,6 +278,12 @@ func (stw *Window) Bbox() (xmin, xmax, ymin, ymax float64) {
 	return mins[0], maxs[0], mins[1], maxs[1]
 }
 
+func (stw *Window) SetCanvasSize() {
+	size := stw.draw.Bounds().Size()
+	stw.CanvasSize[0] = size.W
+	stw.CanvasSize[1] = size.H
+}
+
 func (stw *Window) ShowAtCanvasCenter() {
 	for _, n := range stw.Frame.Nodes {
 		stw.Frame.View.ProjectNode(n)
@@ -281,6 +292,7 @@ func (stw *Window) ShowAtCanvasCenter() {
 	if xmax == xmin && ymax == ymin {
 		return
 	}
+	stw.SetCanvasSize()
 	scale := math.Min(float64(stw.CanvasSize[0])/(xmax-xmin), float64(stw.CanvasSize[1])/(ymax-ymin)) * 0.9
 	if stw.Frame.View.Perspective {
 		stw.Frame.View.Dists[1] *= scale
@@ -314,6 +326,7 @@ func (stw *Window) OpenFile(filename string) error {
 	if stw.Frame != nil {
 		s = stw.Frame.Show
 	}
+	stw.SetCanvasSize()
 	frame.View.Center[0] = float64(stw.CanvasSize[0]) * 0.5
 	frame.View.Center[1] = float64(stw.CanvasSize[1]) * 0.5
 	switch filepath.Ext(fn) {
