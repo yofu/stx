@@ -81,6 +81,7 @@ type Window struct { // {{{
 	theme   gxui.Theme
 	dlg     gxui.Window
 	draw    gxui.Image
+	cline   gxui.TextBox
 	history gxui.TextBox
 
 	CanvasSize []int // width, height
@@ -162,17 +163,16 @@ func (stw *Window) sideBar() gxui.PanelHolder {
 	return holder
 }
 
-func (stw *Window) commandArea() gxui.SplitterLayout {
-	rtn := stw.theme.CreateSplitterLayout()
-	rtn.SetOrientation(gxui.Vertical)
+func (stw *Window) commandArea() gxui.LinearLayout {
+	rtn := stw.theme.CreateLinearLayout()
+	rtn.SetDirection(gxui.TopToBottom)
 	stw.history = stw.theme.CreateTextBox()
 	stw.history.SetMultiline(true)
-	stw.history.SetText("history")
-	current := stw.theme.CreateTextBox()
+	stw.cline = stw.theme.CreateTextBox()
 	rtn.AddChild(stw.history)
-	rtn.AddChild(current)
+	rtn.AddChild(stw.cline)
 	stw.history.SetDesiredWidth(800)
-	current.SetDesiredWidth(800)
+	stw.cline.SetDesiredWidth(800)
 	return rtn
 }
 
