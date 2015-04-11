@@ -222,7 +222,7 @@ func NewWindow(driver gxui.Driver, theme gxui.Theme, homedir string) *Window {
 	stw.dlg.AddChild(vsp)
 	stw.dlg.OnClose(driver.Terminate)
 
-	stw.OpenFile("c:/d/cdocs/hogan/debug/hiroba/hiroba05/hiroba05.inp")
+	stw.OpenFile("hiroba05.inp")
 	stw.Frame.Show.NodeCaption |= st.NC_NUM
 	stw.Frame.Show.ElemCaption |= st.EC_NUM
 	stw.Frame.Show.ElemCaption |= st.EC_SECT
