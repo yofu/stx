@@ -6,6 +6,39 @@ import (
 	"github.com/yofu/st/stlib"
 	"path/filepath"
 	"math"
+	"os"
+)
+
+// Constants & Variables
+// General
+var (
+	// aliases            map[string]*Command
+	sectionaliases     map[int]string
+	Inps               []string
+	SearchingInps      bool
+	SearchingInpsDone  chan bool
+	// DoubleClickCommand = []string{"TOGGLEBOND", "EDITPLATEELEM"}
+	comhistpos         int
+	undopos            int
+	completepos        int
+	completes          []string
+	prevkey            int
+	clineinput         string
+)
+const (
+	nRecentFiles = 3
+	nUndo        = 10
+)
+var (
+	gopath          = os.Getenv("GOPATH")
+	home            = os.Getenv("HOME")
+	releasenote     = filepath.Join(home, ".st/help/releasenote.html")
+	tooldir         = filepath.Join(home, ".st/tool")
+	pgpfile         = filepath.Join(home, ".st/st.pgp")
+	recentfn        = filepath.Join(home, ".st/recent.dat")
+	historyfn       = filepath.Join(home, ".st/history.dat")
+	NOUNDO          = false
+	ALTSELECTNODE   = true
 )
 
 var (
@@ -26,6 +59,16 @@ var MouseButtonNil = gxui.MouseButton(-1)
 
 const (
 	EPS = 1e-4
+)
+
+var (
+	STLOGO = &TextBox{
+		Value:    []string{"         software", "     forstructural", "   analysisthename", "  ofwhichstandsfor", "", " sigmatau  stress", "structure  steel", "andsometh  ing", " likethat"},
+		Position: []float64{100.0, 100.0},
+		Angle:    0.0,
+		Font:     NewFont(),
+		Hide:     false,
+	}
 )
 
 type Window struct { // {{{
@@ -249,6 +292,20 @@ func NewWindow(driver gxui.Driver, theme gxui.Theme, homedir string) *Window {
 	return stw
 }
 
+func (stw *Window) Snapshot() {
+	stw.Changed = true
+	if NOUNDO {
+		return
+	}
+	tmp := make([]*st.Frame, nUndo)
+	tmp[0] = stw.Frame.Snapshot()
+	for i := 0; i < nUndo-1-undopos; i++ {
+		tmp[i+1] = stw.undostack[i+undopos]
+	}
+	stw.undostack = tmp
+	undopos = 0
+}
+
 func (stw *Window) Bbox() (xmin, xmax, ymin, ymax float64) {
 	if stw.Frame == nil || len(stw.Frame.Nodes) == 0 {
 		return 0.0, 0.0, 0.0, 0.0
@@ -343,8 +400,8 @@ func (stw *Window) OpenFile(filename string) error {
 		}
 		stw.Frame = frame
 		frame.SetFocus(nil)
-		// stw.DrawFrameNode()
-		// stw.ShowCenter()
+		stw.DrawFrameNode()
+		stw.ShowCenter()
 	}
 	if s != nil {
 		stw.Frame.Show = s
