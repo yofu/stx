@@ -29,5 +29,6 @@ func appMain(driver gxui.Driver) {
 }
 
 func main() {
+	defer stgxui.StopLogging()
 	gl.StartDriver(appMain)
 }

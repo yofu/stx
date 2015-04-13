@@ -15,7 +15,7 @@ var (
 
 type TextBox struct {
 	Value    []string
-	Position []float64
+	Position []int
 	Angle    float64
 	Font     *Font
 	Hide     bool
@@ -30,7 +30,7 @@ type Font struct {
 func NewTextBox() *TextBox {
 	rtn := new(TextBox)
 	rtn.Value = make([]string, 0)
-	rtn.Position = []float64{0.0, 0.0}
+	rtn.Position = []int{0, 0}
 	rtn.Font = NewFont()
 	rtn.Hide = true
 	return rtn

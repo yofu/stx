@@ -1,29 +1,41 @@
 package stgxui
 
 import (
+	"bufio"
+	"bytes"
+	"errors"
 	"fmt"
 	"github.com/google/gxui"
 	"github.com/yofu/st/stlib"
+	"github.com/yofu/st/stsvg"
+	"log"
 	"path/filepath"
 	"math"
 	"os"
+	"os/exec"
+	"regexp"
+	"runtime"
+	"strconv"
+	"strings"
 )
 
 // Constants & Variables
 // General
 var (
-	// aliases            map[string]*Command
+	aliases            map[string]*Command
 	sectionaliases     map[int]string
 	Inps               []string
 	SearchingInps      bool
 	SearchingInpsDone  chan bool
-	// DoubleClickCommand = []string{"TOGGLEBOND", "EDITPLATEELEM"}
+	DoubleClickCommand = []string{"TOGGLEBOND", "EDITPLATEELEM"}
 	comhistpos         int
 	undopos            int
 	completepos        int
 	completes          []string
 	prevkey            int
 	clineinput         string
+	logf               os.File
+	logger             *log.Logger
 )
 const (
 	nRecentFiles = 3
@@ -41,10 +53,58 @@ var (
 	ALTSELECTNODE   = true
 )
 
+const LOGFILE = "_st.log"
+
+var (
+	LOGLEVEL = []string{"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
+)
+
+const (
+	DEBUG = iota
+	INFO
+	WARNING
+	ERROR
+	CRITICAL
+)
+
+const (
+	repeatcommand      = 0.2 // sec
+	CommandHistorySize = 100
+)
+
+var (
+	axrn_minmax   = regexp.MustCompile("([+-]?[-0-9.]+)<=?([XYZxyz]{1})<=?([+-]?[-0-9.]+)")
+	axrn_min1     = regexp.MustCompile("([+-]?[-0-9.]+)<=?([XYZxyz]{1})")
+	axrn_min2     = regexp.MustCompile("([XYZxyz]{1})>=?([+-]?[-0-9.]+)")
+	axrn_max1     = regexp.MustCompile("([+-]?[-0-9.]+)>=?([XYZxyz]{1})")
+	axrn_max2     = regexp.MustCompile("([XYZxyz]{1})<=?([+-]?[-0-9.]+)")
+	axrn_eq       = regexp.MustCompile("([XYZxyz]{1})=([+-]?[-0-9.]+)")
+	re_etype      = regexp.MustCompile("(?i)^ *et(y(pe?)?)? *={0,2} *([a-zA-Z]+)")
+	re_column     = regexp.MustCompile("(?i)co(l(u(m(n)?)?)?)?$")
+	re_girder     = regexp.MustCompile("(?i)gi(r(d(e(r)?)?)?)?$")
+	re_brace      = regexp.MustCompile("(?i)br(a(c(e)?)?)?$")
+	re_wall       = regexp.MustCompile("(?i)wa(l){0,2}$")
+	re_slab       = regexp.MustCompile("(?i)sl(a(b)?)?$")
+	re_sectnum    = regexp.MustCompile("(?i)^ *sect? *={0,2} *(range[(]{1}){0,1}[[]?([0-9, ]+)[]]?")
+	re_orgsectnum = regexp.MustCompile("(?i)^ *osect? *={0,2} *[[]?([0-9, ]+)[]]?")
+)
+
 var (
 	fixRotate               = false
 	fixMove                 = false
 	deg10                   = 10.0 * math.Pi / 180.0
+)
+
+var (
+	showprintrange        = false
+)
+
+// Paper Size
+const (
+	A4_TATE = iota
+	A4_YOKO
+	A3_TATE
+	A3_YOKO
 )
 
 const (
@@ -57,14 +117,14 @@ const (
 
 var MouseButtonNil = gxui.MouseButton(-1)
 
-const (
+var (
 	EPS = 1e-4
 )
 
 var (
 	STLOGO = &TextBox{
 		Value:    []string{"         software", "     forstructural", "   analysisthename", "  ofwhichstandsfor", "", " sigmatau  stress", "structure  steel", "andsometh  ing", " likethat"},
-		Position: []float64{100.0, 100.0},
+		Position: []int{100, 100},
 		Angle:    0.0,
 		Font:     NewFont(),
 		Hide:     false,
@@ -105,7 +165,7 @@ type Window struct { // {{{
 	endY   int
 	downkey gxui.MouseButton
 
-	// lastcommand     *Command
+	lastcommand     *Command
 	lastexcommand   string
 	lastfig2command string
 
@@ -169,6 +229,37 @@ func (stw *Window) commandArea() gxui.LinearLayout {
 	stw.history = stw.theme.CreateTextBox()
 	stw.history.SetMultiline(true)
 	stw.cline = stw.theme.CreateTextBox()
+	stw.cline.OnKeyDown(func (ev gxui.KeyboardEvent) {
+		switch ev.Key {
+		default:
+			break
+		case gxui.KeyEscape:
+			stw.cline.SetText("")
+		case gxui.KeyBackspace:
+			current := stw.cline.Text()
+			l := len(current)
+			if l > 0 {
+				stw.cline.SetText(current[:l-1])
+			}
+		case gxui.KeyEnter:
+			stw.feedCommand()
+		// case gxui.KeySemicolon:
+		// 	val := stw.cline.Text()
+		// 	if ev.Modifier.Shift() {
+		// 		if val == "" {
+		// 			stw.cline.SetText(";")
+		// 		} else {
+		// 			stw.cline.SetText(":")
+		// 		}
+		// 	} else {
+		// 		if val == "" {
+		// 			stw.cline.SetText(":")
+		// 		} else {
+		// 			stw.cline.SetText(";")
+		// 		}
+		// 	}
+		}
+	})
 	rtn.AddChild(stw.history)
 	rtn.AddChild(stw.cline)
 	stw.history.SetDesiredWidth(800)
@@ -275,26 +366,19 @@ func NewWindow(driver gxui.Driver, theme gxui.Theme, homedir string) *Window {
 	stw.dlg = theme.CreateWindow(1200, 900, "stx")
 	stw.dlg.AddChild(vsp)
 	stw.dlg.OnClose(driver.Terminate)
-	sidedraw.OnKeyDown(func(ev gxui.KeyboardEvent) {
-		switch ev.Key {
-		default:
-			current := stw.cline.Text()
-			newstr := current + KeyString(ev.Key, ev.Modifier.Shift())
-			stw.cline.SetText(newstr)
-		case gxui.KeyEscape:
-			stw.cline.SetText("")
-		case gxui.KeyBackspace:
-			current := stw.cline.Text()
-			l := len(current)
-			if l > 0 {
-				stw.cline.SetText(current[:l-1])
-			}
-		case gxui.KeyEnter:
-			break
-		}
-	})
 
 	stw.SetCanvasSize()
+
+	stw.Changed = false
+	stw.comhist = make([]string, CommandHistorySize)
+	comhistpos = -1
+	stw.recentfiles = make([]string, nRecentFiles)
+	stw.SetRecently()
+	stw.undostack = make([]*st.Frame, nUndo)
+	undopos = 0
+	StartLogging()
+	stw.exmodech = make(chan interface{})
+	stw.exmodeend = make(chan int)
 
 	stw.OpenFile("hiroba05.inp")
 	stw.Frame.Show.NodeCaption |= st.NC_NUM
@@ -383,6 +467,15 @@ func (stw *Window) ShowCenter() {
 	stw.Redraw()
 }
 
+func (stw *Window) SetAngle(phi, theta float64) {
+	if stw.Frame != nil {
+		stw.Frame.View.Angle[0] = phi
+		stw.Frame.View.Angle[1] = theta
+		stw.Redraw()
+		stw.ShowCenter()
+	}
+}
+
 func (stw *Window) MoveOrRotate(ev gxui.MouseEvent) {
 	if !fixMove && (ev.Modifier.Shift() || fixRotate) {
 		stw.Frame.View.Center[0] += float64(ev.Point.X-stw.startX) * CanvasMoveSpeedX
@@ -390,6 +483,209 @@ func (stw *Window) MoveOrRotate(ev gxui.MouseEvent) {
 	} else if !fixRotate {
 		stw.Frame.View.Angle[0] += float64(ev.Point.Y-stw.startY) * CanvasRotateSpeedY
 		stw.Frame.View.Angle[1] -= float64(ev.Point.X-stw.startX) * CanvasRotateSpeedX
+	}
+}
+
+func (stw *Window) Save() error {
+	return stw.SaveFile(filepath.Join(stw.Home, "hogtxt.inp"))
+}
+
+func (stw *Window) SaveAS(fn string) error {
+	err := stw.SaveFile(fn)
+	if err == nil && fn != stw.Frame.Path {
+		stw.Copylsts(fn)
+		stw.Rebase(fn)
+	}
+	return err
+}
+
+func (stw *Window) Copylsts(name string) {
+	if stw.Yn("SAVE AS", ".lst, .fig2, .kjnファイルがあればコピーしますか?") {
+		for _, ext := range []string{".lst", ".fig2", ".kjn"} {
+			src := st.Ce(stw.Frame.Path, ext)
+			dst := st.Ce(name, ext)
+			if st.FileExists(src) {
+				err := st.CopyFile(src, dst)
+				if err == nil {
+					stw.History(fmt.Sprintf("COPY: %s", dst))
+				}
+			}
+		}
+	}
+}
+
+func (stw *Window) Rebase(fn string) {
+	stw.Frame.Name = filepath.Base(fn)
+	stw.Frame.Project = st.ProjectName(fn)
+	path, err := filepath.Abs(fn)
+	if err != nil {
+		stw.Frame.Path = fn
+	} else {
+		stw.Frame.Path = path
+	}
+	// stw.dlg.SetAttribute("TITLE", stw.Frame.Name)
+	stw.Frame.Home = stw.Home
+	stw.AddRecently(fn)
+}
+
+func (stw *Window) SaveFile(fn string) error {
+	var v *st.View
+	if !stw.Frame.View.Perspective {
+		v = stw.Frame.View.Copy()
+		stw.Frame.View.Gfact = 1.0
+		stw.Frame.View.Perspective = true
+		for _, n := range stw.Frame.Nodes {
+			stw.Frame.View.ProjectNode(n)
+		}
+		xmin, xmax, ymin, ymax := stw.Bbox()
+		stw.SetCanvasSize()
+		scale := math.Min(float64(stw.CanvasSize[0])/(xmax-xmin), float64(stw.CanvasSize[1])/(ymax-ymin)) * 0.9
+		stw.Frame.View.Dists[1] *= scale
+	}
+	err := stw.Frame.WriteInp(fn)
+	if v != nil {
+		stw.Frame.View = v
+	}
+	if err != nil {
+		return err
+	}
+	stw.ErrorMessage(errors.New(fmt.Sprintf("SAVE: %s", fn)), INFO)
+	stw.Changed = false
+	return nil
+}
+
+func (stw *Window) SaveFileSelected(fn string, els []*st.Elem) error {
+	var v *st.View
+	if !stw.Frame.View.Perspective {
+		v = stw.Frame.View.Copy()
+		stw.Frame.View.Gfact = 1.0
+		stw.Frame.View.Perspective = true
+		for _, n := range stw.Frame.Nodes {
+			stw.Frame.View.ProjectNode(n)
+		}
+		xmin, xmax, ymin, ymax := stw.Bbox()
+		stw.SetCanvasSize()
+		scale := math.Min(float64(stw.CanvasSize[0])/(xmax-xmin), float64(stw.CanvasSize[1])/(ymax-ymin)) * 0.9
+		stw.Frame.View.Dists[1] *= scale
+	}
+	err := st.WriteInp(fn, stw.Frame.View, stw.Frame.Ai, els)
+	if v != nil {
+		stw.Frame.View = v
+	}
+	if err != nil {
+		return err
+	}
+	stw.ErrorMessage(errors.New(fmt.Sprintf("SAVE: %s", fn)), INFO)
+	stw.Changed = false
+	return nil
+}
+
+func (stw *Window) Close(force bool) {
+	if !force && stw.Changed {
+		if stw.Yn("CHANGED", "変更を保存しますか") {
+			stw.SaveAS("hogtxt.inp")
+		} else {
+			return
+		}
+	}
+	stw.dlg.Close()
+}
+
+func (stw *Window) Open() {
+	name := "hogtxt.inp"
+	// if name, ok := iup.GetOpenFile(stw.Cwd, "*.inp"); ok {
+	err := stw.OpenFile(name)
+	if err != nil {
+		fmt.Println(err)
+	}
+	stw.Redraw()
+}
+
+func (stw *Window) AddRecently(fn string) error {
+	fn = filepath.ToSlash(fn)
+	if st.FileExists(recentfn) {
+		f, err := os.Open(recentfn)
+		if err != nil {
+			return err
+		}
+		stw.recentfiles[0] = fn
+		s := bufio.NewScanner(f)
+		num := 0
+		for s.Scan() {
+			if rfn := s.Text(); rfn != fn {
+				stw.recentfiles[num+1] = rfn
+				num++
+			}
+			if num >= nRecentFiles-1 {
+				break
+			}
+		}
+		f.Close()
+		if err := s.Err(); err != nil {
+			return err
+		}
+		w, err := os.Create(recentfn)
+		if err != nil {
+			return err
+		}
+		defer w.Close()
+		for i := 0; i < nRecentFiles; i++ {
+			w.WriteString(fmt.Sprintf("%s\n", stw.recentfiles[i]))
+		}
+		return nil
+	} else {
+		w, err := os.Create(recentfn)
+		if err != nil {
+			return err
+		}
+		defer w.Close()
+		w.WriteString(fmt.Sprintf("%s\n", fn))
+		stw.recentfiles[0] = fn
+		return nil
+	}
+}
+
+func (stw *Window) ShowRecently() {
+	for i, fn := range stw.recentfiles {
+		if fn != "" {
+			stw.History(fmt.Sprintf("%d: %s", i, fn))
+		}
+	}
+}
+
+func (stw *Window) SetRecently() error {
+	if st.FileExists(recentfn) {
+		f, err := os.Open(recentfn)
+		if err != nil {
+			return err
+		}
+		s := bufio.NewScanner(f)
+		num := 0
+		for s.Scan() {
+			if fn := s.Text(); fn != "" {
+				stw.History(fmt.Sprintf("%d: %s", num, fn))
+				stw.recentfiles[num] = fn
+				num++
+			}
+		}
+		if err := s.Err(); err != nil {
+			return err
+		}
+		return nil
+	} else {
+		return errors.New(fmt.Sprintf("OpenRecently: %s doesn't exist", recentfn))
+	}
+}
+
+func (stw *Window) Reload() {
+	if stw.Frame != nil {
+		stw.Deselect()
+		v := stw.Frame.View
+		s := stw.Frame.Show
+		stw.OpenFile(stw.Frame.Path)
+		stw.Frame.View = v
+		stw.Frame.Show = s
+		stw.Redraw()
 	}
 }
 
@@ -435,18 +731,879 @@ func (stw *Window) OpenFile(filename string) error {
 	stw.Frame.Home = stw.Home
 	// stw.LinkTextValue()
 	stw.Cwd = filepath.Dir(fn)
-	// stw.AddRecently(fn)
-	// stw.Snapshot()
+	stw.AddRecently(fn)
+	stw.Snapshot()
 	stw.Changed = false
 	// stw.HideLogo()
 	return nil
+}
+
+func (stw *Window) Read() {
+	if stw.Frame != nil {
+		name := "hogtxt.otl"
+		// if name, ok := iup.GetOpenFile("", ""); ok {
+		err := stw.ReadFile(name)
+		if err != nil {
+			stw.ErrorMessage(err, ERROR)
+		}
+	}
+}
+
+func (stw *Window) ReadAll() {
+	if stw.Frame != nil {
+		var err error
+		for _, el := range stw.Frame.Elems {
+			switch el.Etype {
+			case st.WBRACE, st.SBRACE:
+				stw.Frame.DeleteElem(el.Num)
+			case st.WALL, st.SLAB:
+				el.Children = make([]*st.Elem, 2)
+			}
+		}
+		exts := []string{".inl", ".ihx", ".ihy", ".otl", ".ohx", ".ohy", ".rat2", ".wgt", ".lst", ".kjn"}
+		read := make([]string, 10)
+		nread := 0
+		for _, ext := range exts {
+			name := st.Ce(stw.Frame.Path, ext)
+			err = stw.ReadFile(name)
+			if err != nil {
+				if ext == ".rat2" {
+					err = stw.ReadFile(st.Ce(stw.Frame.Path, ".rat"))
+					if err == nil {
+						continue
+					}
+				}
+				stw.ErrorMessage(err, ERROR)
+			} else {
+				read[nread] = ext
+				nread++
+			}
+		}
+		stw.History(fmt.Sprintf("READ: %s", strings.Join(read, " ")))
+	}
+}
+
+func (stw *Window) ReadFile(filename string) error {
+	var err error
+	switch filepath.Ext(filename) {
+	default:
+		return errors.New("Unknown Format")
+	case ".inp":
+		x := 0.0
+		y := 0.0
+		z := 0.0
+		err = stw.Frame.ReadInp(filename, []float64{x, y, z}, 0.0, false)
+	case ".inl", ".ihx", ".ihy":
+		err = stw.Frame.ReadData(filename)
+	case ".otl", ".ohx", ".ohy":
+		err = stw.Frame.ReadResult(filename, st.UPDATE_RESULT)
+	case ".rat", ".rat2":
+		err = stw.Frame.ReadRat(filename)
+	case ".lst":
+		err = stw.Frame.ReadLst(filename)
+	case ".wgt":
+		err = stw.Frame.ReadWgt(filename)
+	case ".kjn":
+		err = stw.Frame.ReadKjn(filename)
+	case ".otp":
+		err = stw.Frame.ReadBuckling(filename)
+	case ".otx", ".oty", ".inc":
+		err = stw.Frame.ReadZoubun(filename)
+	}
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (stw *Window) AddPropAndSect(filename string) error {
+	if stw.Frame != nil {
+		err := stw.Frame.AddPropAndSect(filename, true)
+		return err
+	} else {
+		return errors.New("NO FRAME")
+	}
+}
+
+func (stw *Window) PrintSVG(filename string) error {
+	err := stsvg.Print(stw.Frame, filename)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (stw *Window) Complete(str string) string {
+	envval := regexp.MustCompile("[$]([a-zA-Z]+)")
+	if envval.MatchString(str) {
+		efs := envval.FindStringSubmatch(str)
+		if len(efs) >= 2 {
+			val := os.Getenv(strings.ToUpper(efs[1]))
+			if val != "" {
+				str = strings.Replace(str, efs[0], val, 1)
+			}
+		}
+	}
+	if strings.Contains(str, "%") {
+		str = strings.Replace(str, "%:h", stw.Cwd, 1)
+		if stw.Frame != nil {
+			str = strings.Replace(str, "%<", st.PruneExt(stw.Frame.Path), 1)
+			str = strings.Replace(str, "%", stw.Frame.Path, 1)
+		}
+	}
+	sharp := regexp.MustCompile("#([0-9]+)")
+	if sharp.MatchString(str) {
+		sfs := sharp.FindStringSubmatch(str)
+		if len(sfs) >= 2 {
+			tmp, err := strconv.ParseInt(sfs[1], 10, 64)
+			if err == nil && int(tmp) < nRecentFiles {
+				str = strings.Replace(str, sfs[0], stw.recentfiles[int(tmp)], 1)
+			}
+		}
+	}
+	lis := strings.Split(str, " ")
+	path := lis[len(lis)-1]
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(stw.Cwd, path)
+	}
+	var err error
+	tmp, err := filepath.Glob(path + "*")
+	if err != nil || len(tmp) == 0 {
+		completes = make([]string, 0)
+	} else {
+		completes = make([]string, len(tmp))
+		for i := 0; i < len(tmp); i++ {
+			stat, err := os.Stat(tmp[i])
+			if err != nil {
+				continue
+			}
+			if stat.IsDir() {
+				tmp[i] += string(os.PathSeparator)
+			}
+			lis[len(lis)-1] = tmp[i]
+			completes[i] = strings.Join(lis, " ")
+		}
+		completepos = 0
+		str = completes[0]
+	}
+	return str
+}
+
+func PrevComplete(str string) string {
+	if completes == nil || len(completes) == 0 {
+		return str
+	}
+	completepos--
+	if completepos < 0 {
+		completepos = len(completes) - 1
+	}
+	return completes[completepos]
+}
+
+func NextComplete(str string) string {
+	if completes == nil || len(completes) == 0 {
+		return str
+	}
+	completepos++
+	if completepos >= len(completes) {
+		completepos = 0
+	}
+	return completes[completepos]
+}
+
+func (stw *Window) SearchFile(fn string) (string, error) {
+	if _, err := os.Stat(fn); err == nil {
+		return fn, nil
+	} else {
+		pos1 := strings.IndexAny(fn, "0123456789.")
+		if pos1 < 0 {
+			return fn, errors.New(fmt.Sprintf("File not fount %s", fn))
+		}
+		pos2 := strings.IndexAny(fn, "_.")
+		if pos2 < 0 {
+			return fn, errors.New(fmt.Sprintf("File not fount %s", fn))
+		}
+		cand := filepath.Join(stw.Home, fn[:pos1], fn[:pos2], fn)
+		if st.FileExists(cand) {
+			return cand, nil
+		} else {
+			return fn, errors.New(fmt.Sprintf("File not fount %s", fn))
+		}
+	}
+}
+
+func (stw *Window) CurrentLap(comment string, nlap, laps int) {
+	var tb *TextBox
+	if t, tok := stw.TextBox["LAP"]; tok {
+		tb = t
+	} else {
+		tb = NewTextBox()
+		tb.Hide = false
+		tb.Position = []int{30, stw.CanvasSize[1] - 30}
+		stw.TextBox["LAP"] = tb
+	}
+	if comment == "" {
+		tb.Value = []string{fmt.Sprintf("LAP: %3d / %3d", nlap, laps)}
+	} else {
+		tb.Value = []string{comment, fmt.Sprintf("LAP: %3d / %3d", nlap, laps)}
+	}
+}
+
+func (stw *Window) SectionData(sec *st.Sect) {
+	var tb *TextBox
+	if t, tok := stw.TextBox["SECTION"]; tok {
+		tb = t
+	} else {
+		tb = NewTextBox()
+		tb.Hide = false
+		tb.Position = []int{stw.CanvasSize[0] - 400, stw.CanvasSize[1] - 30}
+		stw.TextBox["SECTION"] = tb
+	}
+	tb.Value = strings.Split(sec.InpString(), "\n")
+	if al, ok := stw.Frame.Allows[sec.Num]; ok {
+		tb.Value = append(tb.Value, strings.Split(al.String(), "\n")...)
+	}
+}
+
+func SplitNums(nums string) []int {
+	sectrange := regexp.MustCompile("(?i)^ *range *[(] *([0-9]+) *, *([0-9]+) *[)] *$")
+	if sectrange.MatchString(nums) {
+		fs := sectrange.FindStringSubmatch(nums)
+		start, err := strconv.ParseInt(fs[1], 10, 64)
+		end, err := strconv.ParseInt(fs[2], 10, 64)
+		if err != nil {
+			return nil
+		}
+		if start > end {
+			return nil
+		}
+		sects := make([]int, int(end-start))
+		for i := 0; i < int(end-start); i++ {
+			sects[i] = i + int(start)
+		}
+		return sects
+	} else {
+		splitter := regexp.MustCompile("[, ]")
+		tmp := splitter.Split(nums, -1)
+		rtn := make([]int, len(tmp))
+		i := 0
+		for _, numstr := range tmp {
+			val, err := strconv.ParseInt(strings.Trim(numstr, " "), 10, 64)
+			if err != nil {
+				continue
+			}
+			rtn[i] = int(val)
+			i++
+		}
+		return rtn[:i]
+	}
+}
+
+func SectFilter(str string) (func(*st.Elem) bool, string) {
+	var filterfunc func(el *st.Elem) bool
+	var hstr string
+	var snums []int
+	fs := re_sectnum.FindStringSubmatch(str)
+	if fs[1] != "" {
+		snums = SplitNums(fmt.Sprintf("range(%s)", fs[2]))
+	} else {
+		snums = SplitNums(fs[2])
+	}
+	filterfunc = func(el *st.Elem) bool {
+		for _, snum := range snums {
+			if el.Sect.Num == snum {
+				return true
+			}
+		}
+		return false
+	}
+	hstr = fmt.Sprintf("Sect == %s", fs[1])
+	return filterfunc, hstr
+}
+
+func OriginalSectFilter(str string) (func(*st.Elem) bool, string) {
+	var filterfunc func(el *st.Elem) bool
+	var hstr string
+	fs := re_orgsectnum.FindStringSubmatch(str)
+	if len(fs) < 2 {
+		return nil, ""
+	}
+	snums := SplitNums(fs[1])
+	filterfunc = func(el *st.Elem) bool {
+		if el.Etype != st.WBRACE && el.Etype != st.SBRACE {
+			return false
+		}
+		for _, snum := range snums {
+			if el.OriginalSection().Num == snum {
+				return true
+			}
+		}
+		return false
+	}
+	hstr = fmt.Sprintf("Sect == %s", fs[1])
+	return filterfunc, hstr
+}
+
+func EtypeFilter(str string) (func(*st.Elem) bool, string) {
+	var filterfunc func(el *st.Elem) bool
+	var hstr string
+	fs := re_etype.FindStringSubmatch(str)
+	l := len(fs)
+	if l >= 4 {
+		var val int
+		switch {
+		case re_column.MatchString(fs[l-1]):
+			val = st.COLUMN
+		case re_girder.MatchString(fs[l-1]):
+			val = st.GIRDER
+		case re_brace.MatchString(fs[l-1]):
+			val = st.BRACE
+		case re_wall.MatchString(fs[l-1]):
+			val = st.WALL
+		case re_slab.MatchString(fs[l-1]):
+			val = st.SLAB
+		}
+		filterfunc = func(el *st.Elem) bool {
+			return el.Etype == val
+		}
+		hstr = fmt.Sprintf("Etype == %s", st.ETYPES[val])
+	}
+	return filterfunc, hstr
+}
+
+func (stw *Window) FilterElem(els []*st.Elem, str string) ([]*st.Elem, error) {
+	l := len(els)
+	if els == nil || l == 0 {
+		return nil, errors.New("number of input elems is zero")
+	}
+	parallel := regexp.MustCompile("(?i)^ *// *([xyz]{1})")
+	ortho := regexp.MustCompile("^ *TT *([xyzXYZ]{1})")
+	onplane := regexp.MustCompile("(?i)^ *on *([xyz]{2})")
+	adjoin := regexp.MustCompile("^ *ad(j(o(in?)?)?)? (.*)")
+	var filterfunc func(el *st.Elem) bool
+	var hstr string
+	switch {
+	case parallel.MatchString(str):
+		var axis []float64
+		fs := parallel.FindStringSubmatch(str)
+		if len(fs) < 2 {
+			break
+		}
+		tmp := strings.ToUpper(fs[1])
+		axes := [][]float64{st.XAXIS, st.YAXIS, st.ZAXIS}
+		for i, val := range []string{"X", "Y", "Z"} {
+			if tmp == val {
+				axis = axes[i]
+				break
+			}
+		}
+		filterfunc = func(el *st.Elem) bool {
+			return el.IsParallel(axis, 1e-4)
+		}
+		hstr = fmt.Sprintf("Parallel to %sAXIS", tmp)
+	case ortho.MatchString(str):
+		var axis []float64
+		fs := ortho.FindStringSubmatch(str)
+		if len(fs) < 2 {
+			break
+		}
+		tmp := strings.ToUpper(fs[1])
+		axes := [][]float64{st.XAXIS, st.YAXIS, st.ZAXIS}
+		for i, val := range []string{"X", "Y", "Z"} {
+			if tmp == val {
+				axis = axes[i]
+				break
+			}
+		}
+		filterfunc = func(el *st.Elem) bool {
+			return el.IsOrthogonal(axis, 1e-4)
+		}
+		hstr = fmt.Sprintf("Orthogonal to %sAXIS", tmp)
+	case onplane.MatchString(str):
+		var axis int
+		fs := onplane.FindStringSubmatch(str)
+		if len(fs) < 2 {
+			break
+		}
+		tmp := strings.ToUpper(fs[1])
+		for i, val := range []string{"X", "Y", "Z"} {
+			if strings.Contains(tmp, val) {
+				continue
+			}
+			axis = i
+		}
+		filterfunc = func(el *st.Elem) bool {
+			if el.IsLineElem() {
+				return el.Direction(false)[axis] == 0.0
+			} else {
+				n := el.Normal(false)
+				if n == nil {
+					return false
+				}
+				for i := 0; i < 3; i++ {
+					if i == axis {
+						continue
+					}
+					if n[i] != 0.0 {
+						return false
+					}
+				}
+				return true
+			}
+		}
+	case re_sectnum.MatchString(str):
+		filterfunc, hstr = SectFilter(str)
+	case re_etype.MatchString(str):
+		filterfunc, hstr = EtypeFilter(str)
+	case adjoin.MatchString(str):
+		fs := adjoin.FindStringSubmatch(str)
+		if len(fs) >= 5 {
+			condition := fs[4]
+			var fil func(*st.Elem) bool
+			var hst string
+			switch {
+			case re_sectnum.MatchString(condition):
+				fil, hst = SectFilter(condition)
+			case re_etype.MatchString(condition):
+				fil, hst = EtypeFilter(condition)
+			}
+			if fil == nil {
+				break
+			}
+			filterfunc = func(el *st.Elem) bool {
+				for _, en := range el.Enod {
+					for _, sel := range stw.Frame.SearchElem(en) {
+						if sel.Num == el.Num {
+							continue
+						}
+						if fil(sel) {
+							return true
+						}
+					}
+				}
+				return false
+			}
+			hstr = fmt.Sprintf("ADJOIN TO %s", hst)
+		}
+	}
+	if filterfunc != nil {
+		tmpels := make([]*st.Elem, l)
+		enum := 0
+		for _, el := range els {
+			if el == nil {
+				continue
+			}
+			if filterfunc(el) {
+				tmpels[enum] = el
+				enum++
+			}
+		}
+		rtn := tmpels[:enum]
+		stw.History(fmt.Sprintf("FILTER: %s", hstr))
+		return rtn, nil
+	} else {
+		return els, errors.New("no filtering")
+	}
+}
+
+func (stw *Window) NextFloor() {
+	for _, n := range stw.Frame.Nodes {
+		n.Show()
+	}
+	for _, el := range stw.Frame.Elems {
+		el.Show()
+	}
+	for i, _ := range []string{"ZMIN", "ZMAX"} {
+		tmpval := stw.Frame.Show.Zrange[i]
+		ind := 0
+		for _, ht := range stw.Frame.Ai.Boundary {
+			if ht > tmpval {
+				break
+			}
+			ind++
+		}
+		var val float64
+		l := len(stw.Frame.Ai.Boundary)
+		if ind >= l-1 {
+			val = stw.Frame.Ai.Boundary[l-2+i]
+		} else {
+			val = stw.Frame.Ai.Boundary[ind]
+		}
+		stw.Frame.Show.Zrange[i] = val
+		// stw.Labels[z].SetAttribute("VALUE", fmt.Sprintf("%.3f", val))
+	}
+	stw.Redraw()
+}
+
+func (stw *Window) PrevFloor() {
+	for _, n := range stw.Frame.Nodes {
+		n.Show()
+	}
+	for _, el := range stw.Frame.Elems {
+		el.Show()
+	}
+	for i, _ := range []string{"ZMIN", "ZMAX"} {
+		tmpval := stw.Frame.Show.Zrange[i]
+		ind := 0
+		for _, ht := range stw.Frame.Ai.Boundary {
+			if ht > tmpval {
+				break
+			}
+			ind++
+		}
+		var val float64
+		if ind <= 2 {
+			val = stw.Frame.Ai.Boundary[i]
+		} else {
+			val = stw.Frame.Ai.Boundary[ind-2]
+		}
+		stw.Frame.Show.Zrange[i] = val
+		// stw.Labels[z].SetAttribute("VALUE", fmt.Sprintf("%.3f", val))
+	}
+	stw.Redraw()
+}
+
+func axisrange(stw *Window, axis int, min, max float64, any bool) {
+	tmpnodes := make([]*st.Node, 0)
+	for _, n := range stw.Frame.Nodes {
+		if !(min <= n.Coord[axis] && n.Coord[axis] <= max) {
+			tmpnodes = append(tmpnodes, n)
+			n.Hide()
+		} else {
+			n.Show()
+		}
+	}
+	var tmpelems []*st.Elem
+	if !any {
+		tmpelems = stw.Frame.NodeToElemAny(tmpnodes...)
+	} else {
+		tmpelems = stw.Frame.NodeToElemAll(tmpnodes...)
+	}
+	for _, el := range stw.Frame.Elems {
+		el.Show()
+	}
+	for _, el := range tmpelems {
+		el.Hide()
+	}
+	switch axis {
+	case 0:
+		stw.Frame.Show.Xrange[0] = min
+		stw.Frame.Show.Xrange[1] = max
+		// stw.Labels["XMIN"].SetAttribute("VALUE", fmt.Sprintf("%.3f", min))
+		// stw.Labels["XMAX"].SetAttribute("VALUE", fmt.Sprintf("%.3f", max))
+	case 1:
+		stw.Frame.Show.Yrange[0] = min
+		stw.Frame.Show.Yrange[1] = max
+		// stw.Labels["YMIN"].SetAttribute("VALUE", fmt.Sprintf("%.3f", min))
+		// stw.Labels["YMAX"].SetAttribute("VALUE", fmt.Sprintf("%.3f", max))
+	case 2:
+		stw.Frame.Show.Zrange[0] = min
+		stw.Frame.Show.Zrange[1] = max
+		// stw.Labels["ZMIN"].SetAttribute("VALUE", fmt.Sprintf("%.3f", min))
+		// stw.Labels["ZMAX"].SetAttribute("VALUE", fmt.Sprintf("%.3f", max))
+	}
+	stw.Redraw()
+}
+
+func (stw *Window) feedCommand() {
+	command := stw.cline.Text()
+	if command != "" {
+		stw.addCommandHistory(command)
+		comhistpos = -1
+		stw.cline.SetText("")
+		stw.execAliasCommand(command)
+	}
+}
+
+func (stw *Window) SetCommandHistory() error {
+	if st.FileExists(historyfn) {
+		tmp := make([]string, CommandHistorySize)
+		f, err := os.Open(historyfn)
+		if err != nil {
+			return err
+		}
+		s := bufio.NewScanner(f)
+		num := 0
+		for s.Scan() {
+			if com := s.Text(); com != "" {
+				tmp[num] = com
+				num++
+			}
+		}
+		if err := s.Err(); err != nil {
+			return err
+		}
+		stw.comhist = tmp
+		return nil
+	}
+	return errors.New("SetCommandHistory: file doesn't exist")
+}
+
+func (stw *Window) SaveCommandHistory() error {
+	var otp bytes.Buffer
+	for _, com := range stw.comhist {
+		if com != "" {
+			otp.WriteString(com)
+			otp.WriteString("\n")
+		}
+	}
+	w, err := os.Create(historyfn)
+	defer w.Close()
+	if err != nil {
+		return err
+	}
+	otp = st.AddCR(otp)
+	otp.WriteTo(w)
+	return nil
+}
+
+func (stw *Window) addCommandHistory(str string) {
+	tmp := make([]string, CommandHistorySize)
+	tmp[0] = str
+	for i := 0; i < CommandHistorySize-1; i++ {
+		tmp[i+1] = stw.comhist[i]
+	}
+	stw.comhist = tmp
+}
+
+func (stw *Window) PrevCommand(str string) {
+	for {
+		comhistpos++
+		if comhistpos >= CommandHistorySize {
+			comhistpos = CommandHistorySize - 1
+			return
+		}
+		if strings.HasPrefix(stw.comhist[comhistpos], str) {
+			stw.cline.SetText(stw.comhist[comhistpos])
+			// stw.cline.SetAttribute("CARETPOS", fmt.Sprintf("%d", len(stw.comhist[comhistpos])))
+			return
+		}
+	}
+}
+
+func (stw *Window) NextCommand(str string) {
+	for {
+		comhistpos--
+		if comhistpos <= 0 {
+			comhistpos = -1
+			return
+		}
+		if strings.HasPrefix(stw.comhist[comhistpos], str) {
+			stw.cline.SetText(stw.comhist[comhistpos])
+			// stw.cline.SetAttribute("CARETPOS", fmt.Sprintf("%d", len(stw.comhist[comhistpos])))
+			return
+		}
+	}
+}
+
+func (stw *Window) ExecCommand(com *Command) {
+	stw.History(com.Name)
+	// stw.cname.SetAttribute("VALUE", com.Name)
+	stw.lastcommand = com
+	com.Exec(stw)
+}
+
+func (stw *Window) execAliasCommand(al string) {
+	if stw.Frame == nil {
+		if strings.HasPrefix(al, ":") {
+			err := stw.exmode(al)
+			if err != nil {
+				stw.ErrorMessage(err, ERROR)
+			}
+		} else {
+			stw.Open()
+		}
+		// stw.FocusCanv()
+		return
+	}
+	alu := strings.ToUpper(al)
+	if alu == "." {
+		if stw.lastcommand != nil {
+			stw.ExecCommand(stw.lastcommand)
+		}
+	} else if value, ok := aliases[alu]; ok {
+		stw.ExecCommand(value)
+	} else if value, ok := Commands[alu]; ok {
+		stw.ExecCommand(value)
+	} else {
+		switch {
+		default:
+			stw.History(fmt.Sprintf("command doesn't exist: %s", al))
+		case strings.HasPrefix(al, ":"):
+			err := stw.exmode(al)
+			if err != nil {
+				stw.ErrorMessage(err, ERROR)
+			}
+		// case strings.HasPrefix(al, "'"):
+		// 	err := stw.fig2mode(al)
+		// 	if err != nil {
+		// 		stw.ErrorMessage(err, ERROR)
+		// 	}
+		case axrn_minmax.MatchString(alu):
+			var axis int
+			fs := axrn_minmax.FindStringSubmatch(alu)
+			min, _ := strconv.ParseFloat(fs[1], 64)
+			max, _ := strconv.ParseFloat(fs[3], 64)
+			tmp := strings.ToUpper(fs[2])
+			for i, val := range []string{"X", "Y", "Z"} {
+				if tmp == val {
+					axis = i
+					break
+				}
+			}
+			axisrange(stw, axis, min, max, false)
+			stw.History(fmt.Sprintf("AxisRange: %.3f <= %s <= %.3f", min, tmp, max))
+		case axrn_min1.MatchString(alu):
+			var axis int
+			fs := axrn_min1.FindStringSubmatch(alu)
+			min, _ := strconv.ParseFloat(fs[1], 64)
+			tmp := strings.ToUpper(fs[2])
+			for i, val := range []string{"X", "Y", "Z"} {
+				if tmp == val {
+					axis = i
+					break
+				}
+			}
+			axisrange(stw, axis, min, 1000.0, false)
+			stw.History(fmt.Sprintf("AxisRange: %.3f <= %s", min, tmp))
+		case axrn_min2.MatchString(alu):
+			var axis int
+			fs := axrn_min2.FindStringSubmatch(alu)
+			min, _ := strconv.ParseFloat(fs[2], 64)
+			tmp := strings.ToUpper(fs[1])
+			for i, val := range []string{"X", "Y", "Z"} {
+				if tmp == val {
+					axis = i
+					break
+				}
+			}
+			axisrange(stw, axis, min, 1000.0, false)
+			stw.History(fmt.Sprintf("AxisRange: %.3f <= %s", min, tmp))
+		case axrn_max1.MatchString(alu):
+			var axis int
+			fs := axrn_max1.FindStringSubmatch(alu)
+			max, _ := strconv.ParseFloat(fs[1], 64)
+			tmp := strings.ToUpper(fs[2])
+			for i, val := range []string{"X", "Y", "Z"} {
+				if tmp == val {
+					axis = i
+					break
+				}
+			}
+			axisrange(stw, axis, -100.0, max, false)
+			stw.History(fmt.Sprintf("AxisRange: %s <= %.3f", tmp, max))
+		case axrn_max2.MatchString(alu):
+			var axis int
+			fs := axrn_max2.FindStringSubmatch(alu)
+			max, _ := strconv.ParseFloat(fs[2], 64)
+			tmp := strings.ToUpper(fs[1])
+			for i, val := range []string{"X", "Y", "Z"} {
+				if tmp == val {
+					axis = i
+					break
+				}
+			}
+			axisrange(stw, axis, -100.0, max, false)
+			stw.History(fmt.Sprintf("AxisRange: %s <= %.3f", tmp, max))
+		case axrn_eq.MatchString(alu):
+			var axis int
+			fs := axrn_eq.FindStringSubmatch(alu)
+			val, _ := strconv.ParseFloat(fs[2], 64)
+			tmp := strings.ToUpper(fs[1])
+			for i, val := range []string{"X", "Y", "Z"} {
+				if tmp == val {
+					axis = i
+					break
+				}
+			}
+			axisrange(stw, axis, val, val, false)
+			stw.History(fmt.Sprintf("AxisRange: %s = %.3f", tmp, val))
+		}
+	}
+	stw.Redraw()
+	if stw.cline.Text() == "" {
+		// stw.FocusCanv()
+	}
+	return
 }
 
 func (stw *Window) History(str string) {
 	if str == "" {
 		return
 	}
-	stw.history.SetText(str)
+	current := stw.history.Text()
+	newstr := fmt.Sprintf("%s\n%s", current, str)
+	stw.history.SetText(newstr)
+}
+
+func (stw *Window) ErrorMessage(err error, level uint) {
+	if err == nil {
+		return
+	}
+	var otp string
+	if level >= ERROR {
+		_, file, line, _ := runtime.Caller(1)
+		otp = fmt.Sprintf("%s:%d: [%s]: %s", filepath.Base(file), line, LOGLEVEL[level], err.Error())
+	} else {
+		otp = fmt.Sprintf("[%s]: %s", LOGLEVEL[level], err.Error())
+	}
+	stw.History(otp)
+	logger.Println(otp)
+}
+
+func StartLogging() {
+	logf, err := os.OpenFile(LOGFILE, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0666)
+	if err != nil {
+		fmt.Println(err.Error())
+	}
+	logger = log.New(logf, "", log.LstdFlags)
+	logger.Println("session started")
+}
+
+func StopLogging() {
+	logger.Println("session closed")
+	logf.Close()
+}
+
+func (stw *Window) Deselect() {
+	stw.SelectNode = make([]*st.Node, 0)
+	stw.SelectElem = make([]*st.Elem, 0)
+}
+
+func (stw *Window) Yn(title, question string) bool {
+	return true
+}
+
+func (stw *Window) Yna(title, question, another string) int {
+	return 0
+}
+
+func (stw *Window) SetColorMode(mode uint) {
+	// stw.Labels["COLORMODE"].SetAttribute("VALUE", fmt.Sprintf("  %s", st.ECOLORS[mode]))
+	stw.Frame.Show.ColorMode = mode
+}
+
+func (stw *Window) SetPeriod(per string) {
+	// stw.Labels["PERIOD"].SetAttribute("VALUE", per)
+	stw.Frame.Show.Period = per
+}
+
+func (stw *Window) IncrementPeriod(num int) {
+	pat := regexp.MustCompile("([a-zA-Z]+)(@[0-9]+)")
+	fs := pat.FindStringSubmatch(stw.Frame.Show.Period)
+	if len(fs) < 3 {
+		return
+	}
+	if nl, ok := stw.Frame.Nlap[strings.ToUpper(fs[1])]; ok {
+		tmp, _ := strconv.ParseInt(fs[2][1:], 10, 64)
+		val := int(tmp) + num
+		if val < 1 || val > nl {
+			return
+		}
+		per := strings.Replace(stw.Frame.Show.Period, fs[2], fmt.Sprintf("@%d", val), -1)
+		// stw.Labels["PERIOD"].SetAttribute("VALUE", per)
+		stw.Frame.Show.Period = per
+	}
 }
 
 func (stw *Window) RedrawNode() {
@@ -460,3 +1617,36 @@ func (stw *Window) Redraw() {
 	canvas := stw.DrawFrame()
 	stw.draw.SetCanvas(canvas)
 }
+
+func (stw *Window) ShapeData(sh st.Shape) {
+	var tb *TextBox
+	if t, tok := stw.TextBox["SHAPE"]; tok {
+		tb = t
+	} else {
+		tb = NewTextBox()
+		tb.Hide = false
+		tb.Position = []int{stw.CanvasSize[0] - 300, 200}
+		stw.TextBox["SHAPE"] = tb
+	}
+	var otp bytes.Buffer
+	otp.WriteString(fmt.Sprintf("%s\n", sh.String()))
+	otp.WriteString(fmt.Sprintf("A   = %10.4f [cm2]\n", sh.A()))
+	otp.WriteString(fmt.Sprintf("Asx = %10.4f [cm2]\n", sh.Asx()))
+	otp.WriteString(fmt.Sprintf("Asy = %10.4f [cm2]\n", sh.Asy()))
+	otp.WriteString(fmt.Sprintf("Ix  = %10.4f [cm4]\n", sh.Ix()))
+	otp.WriteString(fmt.Sprintf("Iy  = %10.4f [cm4]\n", sh.Iy()))
+	otp.WriteString(fmt.Sprintf("J   = %10.4f [cm4]\n", sh.J()))
+	otp.WriteString(fmt.Sprintf("Zx  = %10.4f [cm3]\n", sh.Zx()))
+	otp.WriteString(fmt.Sprintf("Zy  = %10.4f [cm3]\n", sh.Zy()))
+	tb.Value = strings.Split(otp.String(), "\n")
+}
+
+func (stw *Window) Vim(fn string) {
+	cmd := exec.Command("gvim", fn)
+	cmd.Start()
+}
+func (stw *Window) EditReadme(dir string) {
+	fn := filepath.Join(dir, "readme.txt")
+	stw.Vim(fn)
+}
+
