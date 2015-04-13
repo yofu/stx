@@ -275,6 +275,24 @@ func NewWindow(driver gxui.Driver, theme gxui.Theme, homedir string) *Window {
 	stw.dlg = theme.CreateWindow(1200, 900, "stx")
 	stw.dlg.AddChild(vsp)
 	stw.dlg.OnClose(driver.Terminate)
+	sidedraw.OnKeyDown(func(ev gxui.KeyboardEvent) {
+		switch ev.Key {
+		default:
+			current := stw.cline.Text()
+			newstr := current + KeyString(ev.Key, ev.Modifier.Shift())
+			stw.cline.SetText(newstr)
+		case gxui.KeyEscape:
+			stw.cline.SetText("")
+		case gxui.KeyBackspace:
+			current := stw.cline.Text()
+			l := len(current)
+			if l > 0 {
+				stw.cline.SetText(current[:l-1])
+			}
+		case gxui.KeyEnter:
+			break
+		}
+	})
 
 	stw.SetCanvasSize()
 
