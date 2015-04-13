@@ -336,7 +336,7 @@ func (stw *Window) Bbox() (xmin, xmax, ymin, ymax float64) {
 }
 
 func (stw *Window) SetCanvasSize() {
-	size := stw.draw.Bounds().Size()
+	size := stw.draw.Size()
 	stw.CanvasSize[0] = size.W
 	stw.CanvasSize[1] = size.H
 }

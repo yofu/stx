@@ -14,7 +14,7 @@ const (
 )
 
 func Line(canvas gxui.Canvas, pen gxui.Pen, x1, y1, x2, y2 int) {
-	p := make(gxui.Polygon, 3)
+	p := make(gxui.Polygon, 2)
 	p[0] = gxui.PolygonVertex{
 		Position: gxmath.Point{
 			X: x1,
