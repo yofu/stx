@@ -25,6 +25,7 @@ var (
 	RubberBrushRight = gxui.CreateBrush(OpaqueColor(gxui.Green, 0.3))
 	RubberPenNode = gxui.CreatePen(1.5, gxui.White)
 	RubberBrushNode = gxui.CreateBrush(OpaqueColor(gxui.Red, 0.3))
+	RubberPenSnap = gxui.CreatePen(1.0, gxui.Yellow)
 	DeformationPen = gxui.CreatePen(0.5, gxui.Gray90)
 	StressTextColor = gxui.White
 	YieldedTextColor = gxui.Yellow

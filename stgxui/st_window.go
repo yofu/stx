@@ -2020,6 +2020,7 @@ func (stw *Window) TailLine(x, y int, ev gxui.MouseEvent) {
 	if stw.rubber != nil {
 		stw.rubber.Release()
 	}
+	stw.rubber = stw.driver.CreateCanvas(gxmath.Size{W: stw.CanvasSize[0], H: stw.CanvasSize[1]})
 	Line(stw.rubber, RubberPenLeft, x, y, int(ev.Point.X), int(ev.Point.Y))
 	stw.rubber.Complete()
 	stw.endX = ev.Point.X
