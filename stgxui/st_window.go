@@ -223,11 +223,13 @@ func (stw *Window) sideBar() gxui.PanelHolder {
 	return holder
 }
 
-func (stw *Window) commandArea() gxui.LinearLayout {
-	rtn := stw.theme.CreateLinearLayout()
-	rtn.SetDirection(gxui.TopToBottom)
+func (stw *Window) initHistoryArea() {
 	stw.history = stw.theme.CreateTextBox()
 	stw.history.SetMultiline(true)
+	stw.history.SetDesiredWidth(800)
+}
+
+func (stw *Window) initCommandLineArea() {
 	stw.cline = stw.theme.CreateTextBox()
 	stw.cline.OnKeyDown(func (ev gxui.KeyboardEvent) {
 		switch ev.Key {
@@ -260,11 +262,7 @@ func (stw *Window) commandArea() gxui.LinearLayout {
 		// 	}
 		}
 	})
-	rtn.AddChild(stw.history)
-	rtn.AddChild(stw.cline)
-	stw.history.SetDesiredWidth(800)
 	stw.cline.SetDesiredWidth(800)
-	return rtn
 }
 
 func NewWindow(driver gxui.Driver, theme gxui.Theme, homedir string) *Window {
@@ -354,14 +352,14 @@ func NewWindow(driver gxui.Driver, theme gxui.Theme, homedir string) *Window {
 	sidedraw.SetChildWeight(side, 0.2)
 	sidedraw.SetChildWeight(stw.draw, 0.8)
 
-	command := stw.commandArea()
+	stw.initHistoryArea()
+	stw.initCommandLineArea()
 
-	vsp := theme.CreateSplitterLayout()
-	vsp.SetOrientation(gxui.Vertical)
+	vsp := theme.CreateLinearLayout()
+	vsp.SetDirection(gxui.TopToBottom)
 	vsp.AddChild(sidedraw)
-	vsp.AddChild(command)
-	vsp.SetChildWeight(sidedraw, 0.9)
-	vsp.SetChildWeight(command, 0.1)
+	vsp.AddChild(stw.history)
+	vsp.AddChild(stw.cline)
 
 	stw.dlg = theme.CreateWindow(1200, 900, "stx")
 	stw.dlg.AddChild(vsp)
