@@ -54,11 +54,10 @@ func get2nodes(stw *Window, f func(n *st.Node), fdel func()) {
 		if stw.Frame != nil {
 			switch ev.Button {
 			case gxui.MouseButtonLeft:
-				if stw.SelectNode[0] != nil {
+				if len(stw.SelectNode) > 0 && stw.SelectNode[0] != nil {
 					if n := stw.PickNode(int(ev.Point.X), int(ev.Point.Y)); n != nil {
 						f(n)
 					}
-					// stw.cdcanv.Line(int(stw.SelectNode[0].Pcoord[0]), int(stw.SelectNode[0].Pcoord[1]), stw.endX, stw.endY) // TODO
 				} else {
 					if n := stw.PickNode(int(ev.Point.X), int(ev.Point.Y)); n != nil {
 						stw.SelectNode[0] = n
@@ -70,7 +69,7 @@ func get2nodes(stw *Window, f func(n *st.Node), fdel func()) {
 				if v := stw.cline.Text(); v != "" {
 					setnnum()
 				} else {
-					// stw.EscapeAll()
+					stw.EscapeAll()
 				}
 			}
 		}
@@ -94,7 +93,7 @@ func get2nodes(stw *Window, f func(n *st.Node), fdel func()) {
 				stw.MoveOrRotate(ev)
 				stw.RedrawNode()
 			}
-			if stw.SelectNode[0] != nil {
+			if len(stw.SelectNode) > 0 && stw.SelectNode[0] != nil {
 				stw.TailLine(int(stw.SelectNode[0].Pcoord[0]), int(stw.SelectNode[0].Pcoord[1]), ev)
 			}
 		}
@@ -160,7 +159,7 @@ func dists(stw *Window) {
 		dx, dy, dz, d := stw.Frame.Distance(stw.SelectNode[0], n)
 		stw.History(fmt.Sprintf("NODE: %d - %d", stw.SelectNode[0].Num, n.Num))
 		stw.History(fmt.Sprintf("DX: %.3f DY: %.3f DZ: %.3f D: %.3f", dx, dy, dz, d))
-		// stw.EscapeAll()
+		stw.EscapeAll()
 	},
 		func() {
 			stw.SelectNode = make([]*st.Node, 2)
@@ -176,7 +175,7 @@ func deformeddists(stw *Window) {
 		stw.History(fmt.Sprintf("DX: %.3f DY: %.3f DZ: %.3f D: %.3f", dx, dy, dz, d))
 		dx, dy, dz, d = stw.Frame.DeformedDistance(stw.SelectNode[0], n)
 		stw.History(fmt.Sprintf("dx: %.3f dy: %.3f dz: %.3f d: %.3f", dx, dy, dz, d))
-		// stw.EscapeAll()
+		stw.EscapeAll()
 	},
 		func() {
 			stw.SelectNode = make([]*st.Node, 2)

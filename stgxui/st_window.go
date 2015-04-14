@@ -272,27 +272,7 @@ func (stw *Window) initCommandLineArea() {
 	stw.cline.SetDesiredWidth(800)
 }
 
-func NewWindow(driver gxui.Driver, theme gxui.Theme, homedir string) *Window {
-	stw := new(Window)
-
-	stw.Home = homedir
-	stw.Cwd = homedir
-	stw.SelectNode = make([]*st.Node, 0)
-	stw.SelectElem = make([]*st.Elem, 0)
-
-	stw.driver = driver
-	stw.theme = theme
-	stw.CanvasSize = []int{1000, 1000}
-
-	sidedraw := theme.CreateSplitterLayout()
-	sidedraw.SetOrientation(gxui.Horizontal)
-
-	side := stw.sideBar()
-
-	stw.downkey = MouseButtonNil
-	stw.modifier = gxui.ModNone
-
-	stw.draw = theme.CreateImage()
+func (stw *Window) initDrawAreaCallback() {
 	stw.draw.OnMouseUp(func (ev gxui.MouseEvent) {
 		stw.downkey = MouseButtonNil
 		if stw.Frame != nil {
@@ -361,6 +341,30 @@ func NewWindow(driver gxui.Driver, theme gxui.Theme, homedir string) *Window {
 			stw.Redraw()
 		}
 	})
+}
+
+func NewWindow(driver gxui.Driver, theme gxui.Theme, homedir string) *Window {
+	stw := new(Window)
+
+	stw.Home = homedir
+	stw.Cwd = homedir
+	stw.SelectNode = make([]*st.Node, 0)
+	stw.SelectElem = make([]*st.Elem, 0)
+
+	stw.driver = driver
+	stw.theme = theme
+	stw.CanvasSize = []int{1000, 1000}
+
+	sidedraw := theme.CreateSplitterLayout()
+	sidedraw.SetOrientation(gxui.Horizontal)
+
+	side := stw.sideBar()
+
+	stw.downkey = MouseButtonNil
+	stw.modifier = gxui.ModNone
+
+	stw.draw = theme.CreateImage()
+	stw.initDrawAreaCallback()
 
 	sidedraw.AddChild(side)
 	sidedraw.AddChild(stw.draw)
@@ -1535,6 +1539,21 @@ func (stw *Window) execAliasCommand(al string) {
 		// stw.FocusCanv()
 	}
 	return
+}
+
+func (stw *Window) EscapeCB() {
+	stw.cline.SetText("")
+	stw.initDrawAreaCallback()
+	if stw.Frame != nil {
+		stw.Redraw()
+	}
+	comhistpos = -1
+	clineinput = ""
+}
+
+func (stw *Window) EscapeAll() {
+	stw.Deselect()
+	stw.EscapeCB()
 }
 
 // Message
