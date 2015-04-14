@@ -6,12 +6,73 @@ import (
 	"github.com/google/gxui"
 	gxmath "github.com/google/gxui/math"
 	"github.com/yofu/st/stlib"
+	"github.com/yofu/st/arclm"
 	"math"
 )
 
 const (
 	CIRCLE_DIV = 8
+	PLANE_OPACITY = float32(0.2)
+	SELECT_OPACITY = 0.5
 )
+
+var (
+	LineWidth = float32(1.0)
+	PlateEdgePen = gxui.CreatePen(0.5, gxui.Gray90)
+	RubberPenLeft = gxui.CreatePen(1.5, gxui.White)
+	RubberBrushLeft = gxui.CreateBrush(OpaqueColor(gxui.Blue, 0.3))
+	RubberPenRight = gxui.CreatePen(1.5, gxui.White)
+	RubberBrushRight = gxui.CreateBrush(OpaqueColor(gxui.Green, 0.3))
+	RubberPenNode = gxui.CreatePen(1.5, gxui.White)
+	RubberBrushNode = gxui.CreateBrush(OpaqueColor(gxui.Red, 0.3))
+	DeformationPen = gxui.CreatePen(0.5, gxui.Gray90)
+	StressTextColor = gxui.White
+	YieldedTextColor = gxui.Yellow
+	BrittleTextColor = gxui.Red
+)
+
+func IntColorFloat32(col int) []float32 {
+	rtn := make([]float32, 3)
+	val := 65536
+	for i := 0; i < 3; i++ {
+		tmp := 0
+		for {
+			if col >= val {
+				col -= val
+				tmp += 1
+			} else {
+				rtn[i] = float32(tmp) / 255.0
+				break
+			}
+		}
+		val >>= 8
+	}
+	return rtn
+}
+
+func OpaqueColor(c gxui.Color, opacity float32) gxui.Color {
+	return gxui.Color{c.R, c.G, c.B, opacity}
+}
+
+func Pen(color int, selected bool) gxui.Pen {
+	c := IntColorFloat32(color)
+	a := float32(1.0)
+	if selected {
+		a = SELECT_OPACITY
+	}
+	col := gxui.Color{c[0], c[1], c[2], a}
+	return gxui.CreatePen(LineWidth, col)
+}
+
+func Brush(color int, selected bool) gxui.Brush {
+	c := IntColorFloat32(color)
+	a := PLANE_OPACITY
+	if selected {
+		a = SELECT_OPACITY
+	}
+	col := gxui.Color{c[0], c[1], c[2], a}
+	return gxui.CreateBrush(col)
+}
 
 func Line(canvas gxui.Canvas, pen gxui.Pen, x1, y1, x2, y2 int) {
 	p := make(gxui.Polygon, 2)
@@ -41,6 +102,41 @@ func PolyLine(canvas gxui.Canvas, pen gxui.Pen, vertices [][]int) {
 		}
 	}
 	canvas.DrawLines(p, pen)
+}
+
+func Polygon(canvas gxui.Canvas, pen gxui.Pen, brush gxui.Brush, vertices [][]int) {
+	l := len(vertices)
+	p := make(gxui.Polygon, l)
+	_, cw := st.ClockWiseInt(vertices[0], vertices[1], vertices[2])
+	if cw {
+		for i, v := range vertices {
+			p[l-1-i] = gxui.PolygonVertex{
+				Position: gxmath.Point{
+					X: v[0],
+					Y: v[1],
+				},
+			}
+		}
+	} else {
+		for i, v := range vertices {
+			p[i] = gxui.PolygonVertex{
+				Position: gxmath.Point{
+					X: v[0],
+					Y: v[1],
+				},
+			}
+		}
+	}
+	canvas.DrawPolygon(p, pen, brush)
+}
+
+func Rect(canvas gxui.Canvas, pen gxui.Pen, brush gxui.Brush, left, right, bottom, top int) {
+	vertices := make([][]int, 4)
+	vertices[0] = []int{left, bottom}
+	vertices[1] = []int{left, top}
+	vertices[2] = []int{right, top}
+	vertices[3] = []int{right, bottom}
+	Polygon(canvas, pen, brush, vertices)
 }
 
 func Arrow(cvs gxui.Canvas, pen gxui.Pen, x1, y1, x2, y2 int, size, theta float64) {
@@ -84,7 +180,7 @@ func FilledCircle(canvas gxui.Canvas, pen gxui.Pen, x, y, r int) {
 	canvas.DrawPolygon(p, pen, gxui.CreateBrush(gxui.White))
 }
 
-func Text(canvas gxui.Canvas, font gxui.Font, x, y int, str string) {
+func Text(canvas gxui.Canvas, font gxui.Font, color gxui.Color, x, y int, str string) {
 	runes := []rune(str)
 	r := gxmath.Rect{
 		Min: gxmath.Point{X: x, Y: y},
@@ -110,7 +206,7 @@ func Text(canvas gxui.Canvas, font gxui.Font, x, y int, str string) {
 	}
 	rs = rs[:pos]
 	os = os[:pos]
-	canvas.DrawRunes(font, rs, os, gxui.White)
+	canvas.DrawRunes(font, rs, os, color)
 }
 
 func (stw *Window) DrawFrameNode() gxui.Canvas {
@@ -120,7 +216,20 @@ func (stw *Window) DrawFrameNode() gxui.Canvas {
 	stw.Frame.View.Set(1)
 	for _, n := range stw.Frame.Nodes {
 		stw.Frame.View.ProjectNode(n)
-		DrawNode(n, canvas, pen, font, stw.Frame.Show)
+		if stw.Frame.Show.Deformation {
+			stw.Frame.View.ProjectDeformation(n, stw.Frame.Show)
+		}
+		if n.IsHidden(stw.Frame.Show) {
+			continue
+		}
+		txtcolor := gxui.White
+		for _, j := range stw.SelectNode {
+			if j == n {
+				txtcolor = gxui.Red
+				break
+			}
+		}
+		DrawNode(n, canvas, pen, font, txtcolor, stw.Frame.Show)
 	}
 	canvas.Complete()
 	return canvas
@@ -133,16 +242,53 @@ func (stw *Window) DrawFrame() gxui.Canvas {
 	stw.Frame.View.Set(1)
 	for _, n := range stw.Frame.Nodes {
 		stw.Frame.View.ProjectNode(n)
-		DrawNode(n, canvas, pen, font, stw.Frame.Show)
+		if stw.Frame.Show.Deformation {
+			stw.Frame.View.ProjectDeformation(n, stw.Frame.Show)
+		}
+		if n.IsHidden(stw.Frame.Show) {
+			continue
+		}
+		txtcolor := gxui.White
+		for _, j := range stw.SelectNode {
+			if j == n {
+				txtcolor = gxui.Red
+				break
+			}
+		}
+		DrawNode(n, canvas, pen, font, txtcolor, stw.Frame.Show)
 	}
-	for _, el := range stw.Frame.Elems {
-		DrawElem(el, canvas, pen, font, stw.Frame.Show)
+	if !stw.Frame.Show.Select {
+		els := st.SortedElem(stw.Frame.Elems, func(e *st.Elem) float64 { return -e.DistFromProjection(stw.Frame.View) })
+		loop:
+		for _, el := range els {
+			if el.IsHidden(stw.Frame.Show) {
+				continue
+			}
+			for _, j := range stw.SelectElem {
+				if j == el {
+					continue loop
+				}
+			}
+			DrawElem(el, canvas, pen, font, gxui.White, false, stw.Frame.Show)
+		}
+	}
+	nomv := stw.Frame.Show.NoMomentValue
+	stw.Frame.Show.NoMomentValue = false
+	for _, el := range stw.SelectElem {
+		if el == nil || el.IsHidden(stw.Frame.Show) {
+			continue
+		}
+		DrawElem(el, canvas, pen, font, gxui.White, true, stw.Frame.Show)
+	}
+	stw.Frame.Show.NoMomentValue = nomv
+	if stw.rubber != nil && stw.rubber.IsComplete() {
+		canvas.DrawCanvas(stw.rubber, gxmath.Point{X: 0, Y: 0})
 	}
 	canvas.Complete()
 	return canvas
 }
 
-func DrawNode(node *st.Node, cvs gxui.Canvas, pen gxui.Pen, font gxui.Font, show *st.Show) {
+func DrawNode(node *st.Node, cvs gxui.Canvas, pen gxui.Pen, font gxui.Font, txtcolor gxui.Color, show *st.Show) {
 	// Caption
 	var ncap bytes.Buffer
 	var oncap bool
@@ -211,7 +357,7 @@ func DrawNode(node *st.Node, cvs gxui.Canvas, pen gxui.Pen, font gxui.Font, show
 		}
 	}
 	if oncap {
-		Text(cvs, font, int(node.Pcoord[0]), int(node.Pcoord[1]), ncap.String())
+		Text(cvs, font, txtcolor, int(node.Pcoord[0]), int(node.Pcoord[1]), ncap.String())
 	}
 	if show.NodeNormal {
 		// DrawNodeNormal(node, cvs, show)
@@ -233,7 +379,7 @@ func DrawNode(node *st.Node, cvs gxui.Canvas, pen gxui.Pen, font gxui.Font, show
 	}
 }
 
-func DrawElem(elem *st.Elem, cvs gxui.Canvas, pen gxui.Pen, font gxui.Font, show *st.Show) {
+func DrawElem(elem *st.Elem, cvs gxui.Canvas, pen gxui.Pen, font gxui.Font, txtcolor gxui.Color, selected bool, show *st.Show) {
 	var ecap bytes.Buffer
 	var oncap bool
 	if show.ElemCaption&st.EC_NUM != 0 {
@@ -312,9 +458,46 @@ func DrawElem(elem *st.Elem, cvs gxui.Canvas, pen gxui.Pen, font gxui.Font, show
 				textpos[i] /= float64(elem.Enods)
 			}
 		}
-		Text(cvs, font, int(textpos[0]), int(textpos[1]), ecap.String())
+		Text(cvs, font, txtcolor, int(textpos[0]), int(textpos[1]), ecap.String())
 	}
 	if elem.IsLineElem() {
+		switch show.ColorMode {
+		case st.ECOLOR_WHITE:
+			pen = gxui.WhitePen
+		case st.ECOLOR_BLACK:
+			pen = gxui.DefaultPen
+		case st.ECOLOR_SECT:
+			pen = Pen(elem.Sect.Color, selected)
+		case st.ECOLOR_RATE:
+			val, err := elem.RateMax(show)
+			if err != nil {
+				pen = Pen(st.GREY_500, selected)
+			} else {
+				pen = Pen(st.Rainbow(val, st.RateBoundary), selected)
+			}
+		case st.ECOLOR_N:
+			if elem.N(show.Period, 0) >= 0.0 {
+				pen = Pen(st.RainbowColor[0], selected) // Compression: Blue
+			} else {
+				pen = Pen(st.RainbowColor[6], selected) // Tension: Red
+			}
+		case st.ECOLOR_STRONG:
+			Ix, err := elem.Sect.Ix(0)
+			if err != nil {
+				pen = gxui.WhitePen
+			}
+			Iy, err := elem.Sect.Iy(0)
+			if err != nil {
+				pen = gxui.WhitePen
+			}
+			if Ix > Iy {
+				pen = Pen(st.RainbowColor[0], selected) // Strong: Blue
+			} else if Ix == Iy {
+				pen = Pen(st.RainbowColor[4], selected) // Same: Yellow
+			} else {
+				pen = Pen(st.RainbowColor[6], selected) // Weak: Red
+			}
+		}
 		Line(cvs, pen, int(elem.Enod[0].Pcoord[0]), int(elem.Enod[0].Pcoord[1]), int(elem.Enod[1].Pcoord[0]), int(elem.Enod[1].Pcoord[1]))
 		pd := elem.PDirection(true)
 		if show.Bond {
@@ -346,10 +529,7 @@ func DrawElem(elem *st.Elem, cvs gxui.Canvas, pen gxui.Pen, font gxui.Font, show
 		}
 		// Deformation
 		if show.Deformation {
-			// cvs.LineStyle(cd.CD_DOTTED)
-			// cvs.Foreground(BondColor)
-			Line(cvs, pen, int(elem.Enod[0].Dcoord[0]), int(elem.Enod[0].Dcoord[1]), int(elem.Enod[1].Dcoord[0]), int(elem.Enod[1].Dcoord[1]))
-			// cvs.LineStyle(cd.CD_CONTINUOUS)
+			Line(cvs, DeformationPen, int(elem.Enod[0].Dcoord[0]), int(elem.Enod[0].Dcoord[1]), int(elem.Enod[1].Dcoord[0]), int(elem.Enod[1].Dcoord[1]))
 		}
 		// Stress
 		var flag uint
@@ -391,7 +571,6 @@ func DrawElem(elem *st.Elem, cvs gxui.Canvas, pen gxui.Pen, font gxui.Font, show
 					}
 				}
 			}
-			// cvs.Foreground(StressTextColor)
 			for j := 0; j < 2; j++ {
 				if tex := sttext[j].String(); tex != "" {
 					coord := make([]float64, 3)
@@ -413,23 +592,24 @@ func DrawElem(elem *st.Elem, cvs gxui.Canvas, pen gxui.Pen, font gxui.Font, show
 						deg += 180.0
 					}
 					// cvs.TextOrientation(deg)
-					Text(cvs, font, int(stpos[0]), int(stpos[1]), tex[:len(tex)-1])
+					Text(cvs, font, StressTextColor, int(stpos[0]), int(stpos[1]), tex[:len(tex)-1])
 					// cvs.TextAlignment(DefaultTextAlignment)
 					// cvs.TextOrientation(0.0)
 				}
 			}
 		}
 		if show.YieldFunction {
-			f, _ := elem.YieldFunction(show.Period)
+			f, err := elem.YieldFunction(show.Period)
 			for j := 0; j < 2; j++ {
-				// switch err[j].(type) {
-				// default:
-				// 	cvs.Foreground(StressTextColor)
-				// case arclm.YieldedError:
-				// 	cvs.Foreground(YieldedTextColor)
-				// case arclm.BrittleFailureError:
-				// 	cvs.Foreground(BrittleTextColor)
-				// }
+				var ycol gxui.Color
+				switch err[j].(type) {
+				default:
+					ycol = StressTextColor
+				case arclm.YieldedError:
+					ycol = YieldedTextColor
+				case arclm.BrittleFailureError:
+					ycol = BrittleTextColor
+				}
 				coord := make([]float64, 3)
 				for i, en := range elem.Enod {
 					for k := 0; k < 3; k++ {
@@ -449,7 +629,7 @@ func DrawElem(elem *st.Elem, cvs gxui.Canvas, pen gxui.Pen, font gxui.Font, show
 					deg += 180.0
 				}
 				// cvs.TextOrientation(deg)
-				Text(cvs, font, int(stpos[0]), int(stpos[1]), fmt.Sprintf("%.3f", f[j]))
+				Text(cvs, font, ycol, int(stpos[0]), int(stpos[1]), fmt.Sprintf("%.3f", f[j]))
 				// cvs.TextAlignment(DefaultTextAlignment)
 				// cvs.TextOrientation(0.0)
 			}
@@ -482,7 +662,25 @@ func DrawElem(elem *st.Elem, cvs gxui.Canvas, pen gxui.Pen, font gxui.Font, show
 		for i, en := range elem.Enod {
 			vers[i] = []int{int(en.Pcoord[0]), int(en.Pcoord[1])}
 		}
-		PolyLine(cvs, pen, vers)
+		var brush gxui.Brush
+		switch show.ColorMode {
+		default:
+			brush = gxui.WhiteBrush
+		case st.ECOLOR_WHITE:
+			brush = gxui.WhiteBrush
+		case st.ECOLOR_BLACK:
+			brush = gxui.DefaultBrush
+		case st.ECOLOR_SECT:
+			brush = Brush(elem.Sect.Color, selected)
+		case st.ECOLOR_RATE:
+			val, err := elem.RateMax(show)
+			if err != nil {
+				brush = Brush(st.GREY_500, selected)
+			} else {
+				brush = Brush(st.Rainbow(val, st.RateBoundary), selected)
+			}
+		}
+		Polygon(cvs, PlateEdgePen, brush, vers)
 		if elem.Wrect != nil && (elem.Wrect[0] != 0.0 || elem.Wrect[1] != 0.0) {
 			// DrawWrect(elem, cvs, show)
 		}

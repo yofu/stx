@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/google/gxui"
+	gxmath "github.com/google/gxui/math"
 	"github.com/yofu/st/stlib"
 	"github.com/yofu/st/stsvg"
 	"log"
@@ -90,6 +91,7 @@ var (
 )
 
 var (
+	first                   = 1
 	fixRotate               = false
 	fixMove                 = false
 	deg10                   = 10.0 * math.Pi / 180.0
@@ -113,6 +115,15 @@ const (
 	CanvasMoveSpeedX   = 0.05
 	CanvasMoveSpeedY   = 0.05
 	CanvasScaleSpeed   = 500
+)
+
+var selectDirection = 0
+
+const nodeSelectPixel = 15
+const dotSelectPixel = 5
+const (
+	SD_FROMLEFT = iota
+	SD_FROMRIGHT
 )
 
 var MouseButtonNil = gxui.MouseButton(-1)
@@ -141,6 +152,7 @@ type Window struct { // {{{
 	theme   gxui.Theme
 	dlg     gxui.Window
 	draw    gxui.Image
+	rubber  gxui.Canvas
 	cline   gxui.TextBox
 	history gxui.TextBox
 
@@ -164,6 +176,7 @@ type Window struct { // {{{
 	endX   int
 	endY   int
 	downkey gxui.MouseButton
+	modifier gxui.KeyboardModifier
 
 	lastcommand     *Command
 	lastexcommand   string
@@ -237,12 +250,6 @@ func (stw *Window) initCommandLineArea() {
 			break
 		case gxui.KeyEscape:
 			stw.cline.SetText("")
-		case gxui.KeyBackspace:
-			current := stw.cline.Text()
-			l := len(current)
-			if l > 0 {
-				stw.cline.SetText(current[:l-1])
-			}
 		case gxui.KeyEnter:
 			stw.feedCommand()
 		// case gxui.KeySemicolon:
@@ -282,27 +289,28 @@ func NewWindow(driver gxui.Driver, theme gxui.Theme, homedir string) *Window {
 
 	side := stw.sideBar()
 
+	stw.downkey = MouseButtonNil
+	stw.modifier = gxui.ModNone
+
 	stw.draw = theme.CreateImage()
 	stw.draw.OnMouseUp(func (ev gxui.MouseEvent) {
 		stw.downkey = MouseButtonNil
-		stw.Redraw()
 		switch ev.Button {
 		case gxui.MouseButtonLeft:
-			fmt.Println("UP: LEFT", ev.Point.X, ev.Point.Y)
-		case gxui.MouseButtonMiddle:
-			fmt.Println("UP: MIDDLE", ev.Point.X, ev.Point.Y)
+			if stw.modifier.Alt() {
+				stw.SelectNodeUp(ev)
+			} else {
+				stw.SelectElemUp(ev)
+			}
 		}
+		stw.rubber = stw.driver.CreateCanvas(gxmath.Size{W: stw.CanvasSize[0], H: stw.CanvasSize[1]})
+		stw.rubber.Complete()
+		stw.Redraw()
 	})
 	stw.draw.OnMouseDown(func (ev gxui.MouseEvent) {
 		stw.downkey = ev.Button
-		switch ev.Button {
-		case gxui.MouseButtonLeft:
-			fmt.Println("DOWN: LEFT", ev.Point.X, ev.Point.Y)
-		case gxui.MouseButtonMiddle:
-			fmt.Println("DOWN: MIDDLE", ev.Point.X, ev.Point.Y)
-		}
-		stw.startX = ev.Point.X
-		stw.startY = ev.Point.Y
+		stw.modifier = ev.Modifier
+		stw.StartSelection(ev)
 	})
 	stw.draw.OnDoubleClick(func (ev gxui.MouseEvent) {
 		switch ev.Button {
@@ -320,7 +328,12 @@ func NewWindow(driver gxui.Driver, theme gxui.Theme, homedir string) *Window {
 			default:
 				return
 			case gxui.MouseButtonLeft:
-				return
+				if stw.modifier.Alt() {
+					stw.SelectNodeMotion(ev)
+				} else {
+					stw.SelectElemMotion(ev)
+				}
+				stw.Redraw()
 			case gxui.MouseButtonMiddle:
 				stw.MoveOrRotate(ev)
 				stw.RedrawNode()
@@ -355,11 +368,18 @@ func NewWindow(driver gxui.Driver, theme gxui.Theme, homedir string) *Window {
 	stw.initHistoryArea()
 	stw.initCommandLineArea()
 
-	vsp := theme.CreateLinearLayout()
-	vsp.SetDirection(gxui.TopToBottom)
+	vll := theme.CreateLinearLayout()
+	vll.SetDirection(gxui.TopToBottom)
+	vll.SetSizeMode(gxui.ExpandToContent)
+	vll.AddChild(stw.history)
+	vll.AddChild(stw.cline)
+
+	vsp := theme.CreateSplitterLayout()
+	vsp.SetOrientation(gxui.Vertical)
 	vsp.AddChild(sidedraw)
-	vsp.AddChild(stw.history)
-	vsp.AddChild(stw.cline)
+	vsp.AddChild(vll)
+	vsp.SetChildWeight(sidedraw, 0.8)
+	vsp.SetChildWeight(vll, 0.2)
 
 	stw.dlg = theme.CreateWindow(1200, 900, "stx")
 	stw.dlg.AddChild(vsp)
@@ -475,7 +495,7 @@ func (stw *Window) SetAngle(phi, theta float64) {
 }
 
 func (stw *Window) MoveOrRotate(ev gxui.MouseEvent) {
-	if !fixMove && (ev.Modifier.Shift() || fixRotate) {
+	if !fixMove && (stw.modifier.Shift() || fixRotate) {
 		stw.Frame.View.Center[0] += float64(ev.Point.X-stw.startX) * CanvasMoveSpeedX
 		stw.Frame.View.Center[1] += float64(ev.Point.Y-stw.startY) * CanvasMoveSpeedY
 	} else if !fixRotate {
@@ -1303,6 +1323,7 @@ func axisrange(stw *Window, axis int, min, max float64, any bool) {
 	stw.Redraw()
 }
 
+// Command
 func (stw *Window) feedCommand() {
 	command := stw.cline.Text()
 	if command != "" {
@@ -1432,11 +1453,11 @@ func (stw *Window) execAliasCommand(al string) {
 			if err != nil {
 				stw.ErrorMessage(err, ERROR)
 			}
-		// case strings.HasPrefix(al, "'"):
-		// 	err := stw.fig2mode(al)
-		// 	if err != nil {
-		// 		stw.ErrorMessage(err, ERROR)
-		// 	}
+		case strings.HasPrefix(al, "'"):
+			err := stw.fig2mode(al)
+			if err != nil {
+				stw.ErrorMessage(err, ERROR)
+			}
 		case axrn_minmax.MatchString(alu):
 			var axis int
 			fs := axrn_minmax.FindStringSubmatch(alu)
@@ -1525,6 +1546,7 @@ func (stw *Window) execAliasCommand(al string) {
 	return
 }
 
+// Message
 func (stw *Window) History(str string) {
 	if str == "" {
 		return
@@ -1562,12 +1584,632 @@ func StopLogging() {
 	logger.Println("session closed")
 	logf.Close()
 }
+///
+
+// Select
+func (stw *Window) PickNode(x, y int) (rtn *st.Node) {
+	mindist := float64(nodeSelectPixel)
+	for _, v := range stw.Frame.Nodes {
+		if v.IsHidden(stw.Frame.Show) {
+			continue
+		}
+		dist := math.Hypot(float64(x)-v.Pcoord[0], float64(y)-v.Pcoord[1])
+		if dist < mindist {
+			mindist = dist
+			rtn = v
+		} else if dist == mindist {
+			if rtn.DistFromProjection(stw.Frame.View) > v.DistFromProjection(stw.Frame.View) {
+				rtn = v
+			}
+		}
+	}
+	if stw.Frame.Show.Kijun {
+		for _, k := range stw.Frame.Kijuns {
+			if k.IsHidden(stw.Frame.Show) {
+				continue
+			}
+			for _, n := range [][]float64{k.Start, k.End} {
+				pc := stw.Frame.View.ProjectCoord(n)
+				dist := math.Hypot(float64(x)-pc[0], float64(y)-pc[1])
+				if dist < mindist {
+					mindist = dist
+					rtn = st.NewNode()
+					rtn.Coord = n
+					rtn.Pcoord = pc
+				}
+			}
+		}
+	}
+	return
+}
+
+func (stw *Window) StartSelection(ev gxui.MouseEvent) {
+	stw.startX = ev.Point.X
+	stw.startY = ev.Point.Y
+	stw.endX = ev.Point.X
+	stw.endY = ev.Point.Y
+	first = 1
+}
+
+func (stw *Window) SelectNodeUp(ev gxui.MouseEvent) {
+	left := min(stw.startX, stw.endX)
+	right := max(stw.startX, stw.endX)
+	bottom := min(stw.startY, stw.endY)
+	top := max(stw.startY, stw.endY)
+	if (right-left < nodeSelectPixel) && (top-bottom < nodeSelectPixel) {
+		n := stw.PickNode(left, bottom)
+		if n != nil {
+			stw.MergeSelectNode([]*st.Node{n}, ev.Modifier.Shift())
+		} else {
+			stw.SelectNode = make([]*st.Node, 0)
+		}
+	} else {
+		tmpselect := make([]*st.Node, len(stw.Frame.Nodes))
+		i := 0
+		for _, v := range stw.Frame.Nodes {
+			if v.IsHidden(stw.Frame.Show) {
+				continue
+			}
+			if float64(left) <= v.Pcoord[0] && v.Pcoord[0] <= float64(right) && float64(bottom) <= v.Pcoord[1] && v.Pcoord[1] <= float64(top) {
+				tmpselect[i] = v
+				i++
+			}
+		}
+		stw.MergeSelectNode(tmpselect[:i], ev.Modifier.Shift())
+	}
+}
+
+// line: (x1, y1) -> (x2, y2), dot: (dx, dy)
+// provided that x1*y2-x2*y1>0
+//     if rtn>0: dot is the same side as (0, 0)
+//     if rtn==0: dot is on the line
+//     if rtn<0: dot is the opposite side to (0, 0)
+func DotLine(x1, y1, x2, y2, dx, dy int) int {
+	return (x1*y2 + x2*dy + dx*y1) - (x1*dy + x2*y1 + dx*y2)
+}
+func FDotLine(x1, y1, x2, y2, dx, dy float64) float64 {
+	return (x1*y2 + x2*dy + dx*y1) - (x1*dy + x2*y1 + dx*y2)
+}
+
+func (stw *Window) PickElem(x, y int) (rtn *st.Elem) {
+	el := stw.PickLineElem(x, y)
+	if el == nil {
+		els := stw.PickPlateElem(x, y)
+		if len(els) > 0 {
+			el = els[0]
+		}
+	}
+	return el
+}
+
+func (stw *Window) PickLineElem(x, y int) (rtn *st.Elem) {
+	mindist := float64(dotSelectPixel)
+	for _, v := range stw.Frame.Elems {
+		if v.IsHidden(stw.Frame.Show) {
+			continue
+		}
+		if v.IsLineElem() && (math.Min(v.Enod[0].Pcoord[0], v.Enod[1].Pcoord[0]) <= float64(x+dotSelectPixel) && math.Max(v.Enod[0].Pcoord[0], v.Enod[1].Pcoord[0]) >= float64(x-dotSelectPixel)) && (math.Min(v.Enod[0].Pcoord[1], v.Enod[1].Pcoord[1]) <= float64(y+dotSelectPixel) && math.Max(v.Enod[0].Pcoord[1], v.Enod[1].Pcoord[1]) >= float64(y-dotSelectPixel)) {
+			dist := math.Abs(FDotLine(v.Enod[0].Pcoord[0], v.Enod[0].Pcoord[1], v.Enod[1].Pcoord[0], v.Enod[1].Pcoord[1], float64(x), float64(y)))
+			if plen := math.Hypot(v.Enod[0].Pcoord[0]-v.Enod[1].Pcoord[0], v.Enod[0].Pcoord[1]-v.Enod[1].Pcoord[1]); plen > 1E-12 {
+				dist /= plen
+			}
+			if dist < mindist {
+				mindist = dist
+				rtn = v
+			}
+		}
+	}
+	return
+}
+
+func abs(val int) int {
+	if val >= 0 {
+		return val
+	} else {
+		return -val
+	}
+}
+func (stw *Window) PickPlateElem(x, y int) []*st.Elem {
+	rtn := make(map[int]*st.Elem)
+	for _, el := range stw.Frame.Elems {
+		if el.IsHidden(stw.Frame.Show) {
+			continue
+		}
+		if !el.IsLineElem() {
+			add := true
+			sign := 0
+			for i := 0; i < int(el.Enods); i++ {
+				var j int
+				if i == int(el.Enods)-1 {
+					j = 0
+				} else {
+					j = i + 1
+				}
+				if FDotLine(el.Enod[i].Pcoord[0], el.Enod[i].Pcoord[1], el.Enod[j].Pcoord[0], el.Enod[j].Pcoord[1], float64(x), float64(y)) > 0 {
+					sign++
+				} else {
+					sign--
+				}
+				if i+1 != abs(sign) {
+					add = false
+					break
+				}
+			}
+			if add {
+				rtn[el.Num] = el
+			}
+		}
+	}
+	return st.SortedElem(rtn, func(e *st.Elem) float64 { return e.DistFromProjection(stw.Frame.View) })
+}
+
+func (stw *Window) SelectElemUp(ev gxui.MouseEvent) {
+	left := min(stw.startX, stw.endX)
+	right := max(stw.startX, stw.endX)
+	bottom := min(stw.startY, stw.endY)
+	top := max(stw.startY, stw.endY)
+	if (right-left < dotSelectPixel) && (top-bottom < dotSelectPixel) {
+		el := stw.PickLineElem(left, bottom)
+		if el == nil {
+			els := stw.PickPlateElem(left, bottom)
+			if len(els) > 0 {
+				el = els[0]
+			}
+		}
+		if el != nil {
+			stw.MergeSelectElem([]*st.Elem{el}, ev.Modifier.Shift())
+		} else {
+			stw.SelectElem = make([]*st.Elem, 0)
+		}
+	} else {
+		tmpselectnode := make([]*st.Node, len(stw.Frame.Nodes))
+		i := 0
+		for _, v := range stw.Frame.Nodes {
+			if float64(left) <= v.Pcoord[0] && v.Pcoord[0] <= float64(right) && float64(bottom) <= v.Pcoord[1] && v.Pcoord[1] <= float64(top) {
+				tmpselectnode[i] = v
+				i++
+			}
+		}
+		tmpselectelem := make([]*st.Elem, len(stw.Frame.Elems))
+		k := 0
+		switch selectDirection {
+		case SD_FROMLEFT:
+			for _, el := range stw.Frame.Elems {
+				if el.IsHidden(stw.Frame.Show) {
+					continue
+				}
+				add := true
+				for _, en := range el.Enod {
+					var j int
+					for j = 0; j < i; j++ {
+						if en == tmpselectnode[j] {
+							break
+						}
+					}
+					if j == i {
+						add = false
+						break
+					}
+				}
+				if add {
+					tmpselectelem[k] = el
+					k++
+				}
+			}
+		case SD_FROMRIGHT:
+			for _, el := range stw.Frame.Elems {
+				if el.IsHidden(stw.Frame.Show) {
+					continue
+				}
+				add := false
+				for _, en := range el.Enod {
+					found := false
+					for j := 0; j < i; j++ {
+						if en == tmpselectnode[j] {
+							found = true
+							break
+						}
+					}
+					if found {
+						add = true
+						break
+					}
+				}
+				if add {
+					tmpselectelem[k] = el
+					k++
+				}
+			}
+		}
+		stw.MergeSelectElem(tmpselectelem[:k], ev.Modifier.Shift())
+	}
+}
+
+func (stw *Window) SelectElemFenceUp(ev gxui.MouseEvent) {
+	tmpselectelem := make([]*st.Elem, len(stw.Frame.Elems))
+	k := 0
+	for _, el := range stw.Frame.Elems {
+		if el.IsHidden(stw.Frame.Show) {
+			continue
+		}
+		add := false
+		sign := 0
+		for i, en := range el.Enod {
+			if FDotLine(float64(stw.startX), float64(stw.startY), float64(stw.endX), float64(stw.endY), en.Pcoord[0], en.Pcoord[1]) > 0 {
+				sign++
+			} else {
+				sign--
+			}
+			if i+1 != abs(sign) {
+				add = true
+				break
+			}
+		}
+		if add {
+			if el.IsLineElem() {
+				if FDotLine(el.Enod[0].Pcoord[0], el.Enod[0].Pcoord[1], el.Enod[1].Pcoord[0], el.Enod[1].Pcoord[1], float64(stw.startX), float64(stw.startY))*FDotLine(el.Enod[0].Pcoord[0], el.Enod[0].Pcoord[1], el.Enod[1].Pcoord[0], el.Enod[1].Pcoord[1], float64(stw.endX), float64(stw.endY)) < 0 {
+					tmpselectelem[k] = el
+					k++
+				}
+			} else {
+				addx := false
+				sign := 0
+				for i, j := range el.Enod {
+					if float64(max(stw.startX, stw.endX)) < j.Pcoord[0] {
+						sign++
+					} else if j.Pcoord[0] < float64(min(stw.startX, stw.endX)) {
+						sign--
+					}
+					if i+1 != abs(sign) {
+						addx = true
+						break
+					}
+				}
+				if addx {
+					addy := false
+					sign := 0
+					for i, j := range el.Enod {
+						if float64(max(stw.startY, stw.endY)) < j.Pcoord[1] {
+							sign++
+						} else if j.Pcoord[1] < float64(min(stw.startY, stw.endY)) {
+							sign--
+						}
+						if i+1 != abs(sign) {
+							addy = true
+							break
+						}
+					}
+					if addy {
+						tmpselectelem[k] = el
+						k++
+					}
+				}
+			}
+		}
+	}
+	stw.MergeSelectElem(tmpselectelem[:k], ev.Modifier.Shift())
+	stw.Redraw()
+}
+
+func (stw *Window) MergeSelectNode(nodes []*st.Node, isshift bool) {
+	k := len(nodes)
+	if isshift {
+		for l := 0; l < k; l++ {
+			for m, el := range stw.SelectNode {
+				if el == nodes[l] {
+					if m == len(stw.SelectNode)-1 {
+						stw.SelectNode = stw.SelectNode[:m]
+					} else {
+						stw.SelectNode = append(stw.SelectNode[:m], stw.SelectNode[m+1:]...)
+					}
+					break
+				}
+			}
+		}
+	} else {
+		var add bool
+		for l := 0; l < k; l++ {
+			add = true
+			for _, n := range stw.SelectNode {
+				if n == nodes[l] {
+					add = false
+					break
+				}
+			}
+			if add {
+				stw.SelectNode = append(stw.SelectNode, nodes[l])
+			}
+		}
+	}
+}
+
+func (stw *Window) MergeSelectElem(elems []*st.Elem, isshift bool) {
+	k := len(elems)
+	if isshift {
+		for l := 0; l < k; l++ {
+			for m, el := range stw.SelectElem {
+				if el == elems[l] {
+					if m == len(stw.SelectElem)-1 {
+						stw.SelectElem = stw.SelectElem[:m]
+					} else {
+						stw.SelectElem = append(stw.SelectElem[:m], stw.SelectElem[m+1:]...)
+					}
+					break
+				}
+			}
+		}
+	} else {
+		var add bool
+		for l := 0; l < k; l++ {
+			add = true
+			for _, n := range stw.SelectElem {
+				if n == elems[l] {
+					add = false
+					break
+				}
+			}
+			if add {
+				stw.SelectElem = append(stw.SelectElem, elems[l])
+			}
+		}
+	}
+}
+
+func (stw *Window) SelectNodeMotion(ev gxui.MouseEvent) {
+	if stw.startX <= ev.Point.X {
+		selectDirection = SD_FROMLEFT
+		if stw.rubber != nil {
+			stw.rubber.Release()
+		}
+		stw.rubber = stw.driver.CreateCanvas(gxmath.Size{W: stw.CanvasSize[0], H: stw.CanvasSize[1]})
+		Rect(stw.rubber, RubberPenNode, RubberBrushNode, int(ev.Point.X), stw.startX, min(stw.startY, int(ev.Point.Y)), max(stw.startY, int(ev.Point.Y)))
+		stw.rubber.Complete()
+		stw.endX = ev.Point.X
+		stw.endY = ev.Point.X
+	} else {
+		selectDirection = SD_FROMRIGHT
+		if stw.rubber != nil {
+			stw.rubber.Release()
+		}
+		stw.rubber = stw.driver.CreateCanvas(gxmath.Size{W: stw.CanvasSize[0], H: stw.CanvasSize[1]})
+		Rect(stw.rubber, RubberPenNode, RubberBrushNode, stw.startX, int(ev.Point.X), min(stw.startY, int(ev.Point.Y)), max(stw.startY, int(ev.Point.Y)))
+		stw.rubber.Complete()
+		stw.endX = ev.Point.X
+		stw.endY = ev.Point.Y
+	}
+}
+
+func (stw *Window) SelectElemMotion(ev gxui.MouseEvent) {
+	if stw.startX <= ev.Point.X {
+		selectDirection = SD_FROMLEFT
+		if stw.rubber != nil {
+			stw.rubber.Release()
+		}
+		stw.rubber = stw.driver.CreateCanvas(gxmath.Size{W: stw.CanvasSize[0], H: stw.CanvasSize[1]})
+		Rect(stw.rubber, RubberPenLeft, RubberBrushLeft, int(ev.Point.X), stw.startX, min(stw.startY, int(ev.Point.Y)), max(stw.startY, int(ev.Point.Y)))
+		stw.rubber.Complete()
+		stw.endX = ev.Point.X
+		stw.endY = ev.Point.Y
+	} else {
+		selectDirection = SD_FROMRIGHT
+		if stw.rubber != nil {
+			stw.rubber.Release()
+		}
+		stw.rubber = stw.driver.CreateCanvas(gxmath.Size{W: stw.CanvasSize[0], H: stw.CanvasSize[1]})
+		Rect(stw.rubber, RubberPenRight, RubberBrushRight, stw.startX, int(ev.Point.X), min(stw.startY, int(ev.Point.Y)), max(stw.startY, int(ev.Point.Y)))
+		stw.rubber.Complete()
+		stw.endX = ev.Point.X
+		stw.endY = ev.Point.Y
+	}
+}
+
+func (stw *Window) SelectElemFenceMotion(ev gxui.MouseEvent) {
+	if ev.Modifier.Control() {
+		if stw.rubber != nil {
+			stw.rubber.Release()
+		}
+		stw.rubber = stw.driver.CreateCanvas(gxmath.Size{W: stw.CanvasSize[0], H: stw.CanvasSize[1]})
+		Line(stw.rubber, RubberPenLeft, stw.startX, stw.startY, int(ev.Point.X), stw.startY)
+		stw.rubber.Complete()
+		stw.endX = ev.Point.X
+		stw.endY = stw.startY
+	} else {
+		if stw.rubber != nil {
+			stw.rubber.Release()
+		}
+		stw.rubber = stw.driver.CreateCanvas(gxmath.Size{W: stw.CanvasSize[0], H: stw.CanvasSize[1]})
+		Line(stw.rubber, RubberPenLeft, stw.startX, stw.startY, int(ev.Point.X), int(ev.Point.Y))
+		stw.rubber.Complete()
+		stw.endX = ev.Point.X
+		stw.endY = ev.Point.Y
+	}
+}
+
+func (stw *Window) TailLine(x, y int, ev gxui.MouseEvent) {
+	if stw.rubber != nil {
+		stw.rubber.Release()
+	}
+	Line(stw.rubber, RubberPenLeft, x, y, int(ev.Point.X), int(ev.Point.Y))
+	stw.rubber.Complete()
+	stw.endX = ev.Point.X
+	stw.endY = ev.Point.Y
+}
+
+func (stw *Window) TailPolygon(ns []*st.Node, ev gxui.MouseEvent) {
+	l := len(ns) + 1
+	num := 0
+	coords := make([][]int, l)
+	for i := 0; i < l-1; i++ {
+		if ns[i] == nil {
+			continue
+		}
+		coords[num] = []int{int(ns[i].Pcoord[0]), int(ns[i].Pcoord[1])}
+		num++
+	}
+	coords[num] = []int{ev.Point.X, ev.Point.Y}
+	if stw.rubber != nil {
+		stw.rubber.Release()
+	}
+	Polygon(stw.rubber, RubberPenLeft, RubberBrushLeft, coords[:num+1])
+	stw.rubber.Complete()
+	stw.endX = ev.Point.X
+	stw.endY = ev.Point.Y
+}
 
 func (stw *Window) Deselect() {
 	stw.SelectNode = make([]*st.Node, 0)
 	stw.SelectElem = make([]*st.Elem, 0)
 }
+///
 
+
+// Show&Hide
+func (stw *Window) SetShowRange() {
+	xmin, xmax, ymin, ymax, zmin, zmax := stw.Frame.Bbox()
+	stw.Frame.Show.Xrange[0] = xmin
+	stw.Frame.Show.Xrange[1] = xmax
+	stw.Frame.Show.Yrange[0] = ymin
+	stw.Frame.Show.Yrange[1] = ymax
+	stw.Frame.Show.Zrange[0] = zmin
+	stw.Frame.Show.Zrange[1] = zmax
+	// stw.Labels["XMAX"].SetAttribute("VALUE", fmt.Sprintf("%.3f", xmax))
+	// stw.Labels["XMIN"].SetAttribute("VALUE", fmt.Sprintf("%.3f", xmin))
+	// stw.Labels["YMAX"].SetAttribute("VALUE", fmt.Sprintf("%.3f", ymax))
+	// stw.Labels["YMIN"].SetAttribute("VALUE", fmt.Sprintf("%.3f", ymin))
+	// stw.Labels["ZMAX"].SetAttribute("VALUE", fmt.Sprintf("%.3f", zmax))
+	// stw.Labels["ZMIN"].SetAttribute("VALUE", fmt.Sprintf("%.3f", zmin))
+}
+
+func (stw *Window) HideNotSelected() {
+	if stw.SelectElem != nil {
+		for _, n := range stw.Frame.Nodes {
+			n.Hide()
+		}
+		for _, el := range stw.Frame.Elems {
+			el.Hide()
+		}
+		for _, el := range stw.SelectElem {
+			if el != nil {
+				el.Show()
+				for _, en := range el.Enod {
+					en.Show()
+				}
+			}
+		}
+	}
+	stw.SetShowRange()
+	stw.Redraw()
+}
+
+func (stw *Window) HideSelected() {
+	if stw.SelectElem != nil {
+		for _, el := range stw.SelectElem {
+			if el != nil {
+				el.Hide()
+			}
+		}
+	}
+	stw.SetShowRange()
+	stw.Redraw()
+}
+
+func (stw *Window) LockNotSelected() {
+	if stw.SelectElem != nil {
+		for _, n := range stw.Frame.Nodes {
+			n.Lock = true
+		}
+		for _, el := range stw.Frame.Elems {
+			el.Lock = true
+		}
+		for _, el := range stw.SelectElem {
+			if el != nil {
+				el.Lock = false
+				for _, en := range el.Enod {
+					en.Lock = false
+				}
+			}
+		}
+	}
+	stw.Redraw()
+}
+
+func (stw *Window) LockSelected() {
+	if stw.SelectElem != nil {
+		for _, el := range stw.SelectElem {
+			if el != nil {
+				el.Lock = true
+				for _, en := range el.Enod {
+					en.Lock = true
+				}
+			}
+		}
+	}
+	stw.Redraw()
+}
+
+func (stw *Window) HideAllSection() {
+	for i, _ := range stw.Frame.Show.Sect {
+		// if lb, ok := stw.Labels[fmt.Sprintf("%d", i)]; ok {
+		// 	lb.SetAttribute("FGCOLOR", labelOFFColor)
+		// }
+		stw.Frame.Show.Sect[i] = false
+	}
+}
+
+func (stw *Window) ShowAllSection() {
+	for i, _ := range stw.Frame.Show.Sect {
+		// if lb, ok := stw.Labels[fmt.Sprintf("%d", i)]; ok {
+		// 	lb.SetAttribute("FGCOLOR", labelFGColor)
+		// }
+		stw.Frame.Show.Sect[i] = true
+	}
+}
+
+func (stw *Window) HideSection(snum int) {
+	// if lb, ok := stw.Labels[fmt.Sprintf("%d", snum)]; ok {
+	// 	lb.SetAttribute("FGCOLOR", labelOFFColor)
+	// }
+	stw.Frame.Show.Sect[snum] = false
+}
+
+func (stw *Window) ShowSection(snum int) {
+	// if lb, ok := stw.Labels[fmt.Sprintf("%d", snum)]; ok {
+	// 	lb.SetAttribute("FGCOLOR", labelFGColor)
+	// }
+	stw.Frame.Show.Sect[snum] = true
+}
+
+func (stw *Window) HideEtype(etype int) {
+	if etype == 0 {
+		return
+	}
+	stw.Frame.Show.Etype[etype] = false
+	// if lbl, ok := stw.Labels[st.ETYPES[etype]]; ok {
+	// 	lbl.SetAttribute("FGCOLOR", labelOFFColor)
+	// }
+}
+
+func (stw *Window) ShowEtype(etype int) {
+	if etype == 0 {
+		return
+	}
+	stw.Frame.Show.Etype[etype] = true
+	// if lbl, ok := stw.Labels[st.ETYPES[etype]]; ok {
+	// 	lbl.SetAttribute("FGCOLOR", labelFGColor)
+	// }
+}
+
+func (stw *Window) ToggleEtype(etype int) {
+	if stw.Frame.Show.Etype[etype] {
+		stw.HideEtype(etype)
+	} else {
+		stw.ShowEtype(etype)
+	}
+}
+/// Show/Hide
+
+
+// Query
 func (stw *Window) Yn(title, question string) bool {
 	return true
 }
@@ -1575,7 +2217,10 @@ func (stw *Window) Yn(title, question string) bool {
 func (stw *Window) Yna(title, question, another string) int {
 	return 0
 }
+/// Query
 
+
+// Label
 func (stw *Window) SetColorMode(mode uint) {
 	// stw.Labels["COLORMODE"].SetAttribute("VALUE", fmt.Sprintf("  %s", st.ECOLORS[mode]))
 	stw.Frame.Show.ColorMode = mode
@@ -1603,6 +2248,110 @@ func (stw *Window) IncrementPeriod(num int) {
 		stw.Frame.Show.Period = per
 	}
 }
+
+func (stw *Window) NodeCaptionOn(name string) {
+	for i, j := range st.NODECAPTIONS {
+		if j == name {
+			// if lbl, ok := stw.Labels[name]; ok {
+				// lbl.SetAttribute("FGCOLOR", labelFGColor)
+			// }
+			if stw.Frame != nil {
+				stw.Frame.Show.NodeCaptionOn(1 << uint(i))
+			}
+		}
+	}
+}
+
+func (stw *Window) NodeCaptionOff(name string) {
+	for i, j := range st.NODECAPTIONS {
+		if j == name {
+			// if lbl, ok := stw.Labels[name]; ok {
+			// 	lbl.SetAttribute("FGCOLOR", labelOFFColor)
+			// }
+			if stw.Frame != nil {
+				stw.Frame.Show.NodeCaptionOff(1 << uint(i))
+			}
+		}
+	}
+}
+
+func (stw *Window) ElemCaptionOn(name string) {
+	for i, j := range st.ELEMCAPTIONS {
+		if j == name {
+			// if lbl, ok := stw.Labels[name]; ok {
+			// 	lbl.SetAttribute("FGCOLOR", labelFGColor)
+			// }
+			if stw.Frame != nil {
+				stw.Frame.Show.ElemCaptionOn(1 << uint(i))
+			}
+		}
+	}
+}
+
+func (stw *Window) ElemCaptionOff(name string) {
+	for i, j := range st.ELEMCAPTIONS {
+		if j == name {
+			// if lbl, ok := stw.Labels[name]; ok {
+			// 	lbl.SetAttribute("FGCOLOR", labelOFFColor)
+			// }
+			if stw.Frame != nil {
+				stw.Frame.Show.ElemCaptionOff(1 << uint(i))
+			}
+		}
+	}
+}
+
+func (stw *Window) StressOn(etype int, index uint) {
+	stw.Frame.Show.Stress[etype] |= (1 << index)
+	// if etype <= st.SLAB {
+	// 	if lbl, ok := stw.Labels[fmt.Sprintf("%s_%s", st.ETYPES[etype], strings.ToUpper(st.StressName[index]))]; ok {
+	// 		lbl.SetAttribute("FGCOLOR", labelFGColor)
+	// 	}
+	// }
+}
+
+func (stw *Window) StressOff(etype int, index uint) {
+	stw.Frame.Show.Stress[etype] &= ^(1 << index)
+	// if etype <= st.SLAB {
+	// 	if lbl, ok := stw.Labels[fmt.Sprintf("%s_%s", st.ETYPES[etype], strings.ToUpper(st.StressName[index]))]; ok {
+	// 		lbl.SetAttribute("FGCOLOR", labelOFFColor)
+	// 	}
+	// }
+}
+
+func (stw *Window) DeformationOn() {
+	stw.Frame.Show.Deformation = true
+	// stw.Labels["DEFORMATION"].SetAttribute("FGCOLOR", labelFGColor)
+}
+
+func (stw *Window) DeformationOff() {
+	stw.Frame.Show.Deformation = false
+	// stw.Labels["DEFORMATION"].SetAttribute("FGCOLOR", labelOFFColor)
+}
+
+func (stw *Window) DispOn(direction int) {
+	name := fmt.Sprintf("NC_%s", st.DispName[direction])
+	for i, str := range st.NODECAPTIONS {
+		if name == str {
+			stw.Frame.Show.NodeCaption |= (1 << uint(i))
+			// stw.Labels[name].SetAttribute("FGCOLOR", labelFGColor)
+			return
+		}
+	}
+}
+
+func (stw *Window) DispOff(direction int) {
+	name := fmt.Sprintf("NC_%s", st.DispName[direction])
+	for i, str := range st.NODECAPTIONS {
+		if name == str {
+			stw.Frame.Show.NodeCaption &= ^(1 << uint(i))
+			// stw.Labels[name].SetAttribute("FGCOLOR", labelOFFColor)
+			return
+		}
+	}
+}
+/// Label
+
 
 func (stw *Window) RedrawNode() {
 	stw.draw.Canvas().Release()
@@ -1648,3 +2397,17 @@ func (stw *Window) EditReadme(dir string) {
 	stw.Vim(fn)
 }
 
+func min(x, y int) int {
+	if x >= y {
+		return y
+	} else {
+		return x
+	}
+}
+func max(x, y int) int {
+	if x >= y {
+		return x
+	} else {
+		return y
+	}
+}
