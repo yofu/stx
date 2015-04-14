@@ -235,6 +235,17 @@ func (stw *Window) DrawFrameNode() gxui.Canvas {
 		}
 		DrawNode(n, canvas, pen, font, txtcolor, stw.Frame.Show)
 	}
+	if stw.SelectElem != nil {
+		nomv := stw.Frame.Show.NoMomentValue
+		stw.Frame.Show.NoMomentValue = false
+		for _, el := range stw.SelectElem {
+			if el == nil || el.IsHidden(stw.Frame.Show) {
+				continue
+			}
+			DrawElem(el, canvas, pen, font, gxui.White, true, stw.Frame.Show)
+		}
+		stw.Frame.Show.NoMomentValue = nomv
+	}
 	canvas.Complete()
 	return canvas
 }
@@ -280,15 +291,17 @@ func (stw *Window) DrawFrame() gxui.Canvas {
 			DrawElem(el, canvas, pen, font, gxui.White, false, stw.Frame.Show)
 		}
 	}
-	nomv := stw.Frame.Show.NoMomentValue
-	stw.Frame.Show.NoMomentValue = false
-	for _, el := range stw.SelectElem {
-		if el == nil || el.IsHidden(stw.Frame.Show) {
-			continue
+	if stw.SelectElem != nil {
+		nomv := stw.Frame.Show.NoMomentValue
+		stw.Frame.Show.NoMomentValue = false
+		for _, el := range stw.SelectElem {
+			if el == nil || el.IsHidden(stw.Frame.Show) {
+				continue
+			}
+			DrawElem(el, canvas, pen, font, gxui.White, true, stw.Frame.Show)
 		}
-		DrawElem(el, canvas, pen, font, gxui.White, true, stw.Frame.Show)
+		stw.Frame.Show.NoMomentValue = nomv
 	}
-	stw.Frame.Show.NoMomentValue = nomv
 	if stw.rubber != nil && stw.rubber.IsComplete() {
 		canvas.DrawCanvas(stw.rubber, gxmath.Point{X: 0, Y: 0})
 	}
