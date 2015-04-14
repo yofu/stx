@@ -295,12 +295,14 @@ func NewWindow(driver gxui.Driver, theme gxui.Theme, homedir string) *Window {
 	stw.draw = theme.CreateImage()
 	stw.draw.OnMouseUp(func (ev gxui.MouseEvent) {
 		stw.downkey = MouseButtonNil
-		switch ev.Button {
-		case gxui.MouseButtonLeft:
-			if stw.modifier.Alt() {
-				stw.SelectNodeUp(ev)
-			} else {
-				stw.SelectElemUp(ev)
+		if stw.Frame != nil {
+			switch ev.Button {
+			case gxui.MouseButtonLeft:
+				if stw.modifier.Alt() {
+					stw.SelectNodeUp(ev)
+				} else {
+					stw.SelectElemUp(ev)
+				}
 			}
 		}
 		stw.rubber = stw.driver.CreateCanvas(gxmath.Size{W: stw.CanvasSize[0], H: stw.CanvasSize[1]})

@@ -211,6 +211,10 @@ func Text(canvas gxui.Canvas, font gxui.Font, color gxui.Color, x, y int, str st
 
 func (stw *Window) DrawFrameNode() gxui.Canvas {
 	canvas := stw.driver.CreateCanvas(gxmath.Size{W: stw.CanvasSize[0], H: stw.CanvasSize[1]})
+	if stw.Frame == nil {
+		canvas.Complete()
+		return canvas
+	}
 	pen := gxui.CreatePen(1, gxui.White)
 	font := stw.theme.DefaultFont()
 	stw.Frame.View.Set(1)
@@ -237,6 +241,10 @@ func (stw *Window) DrawFrameNode() gxui.Canvas {
 
 func (stw *Window) DrawFrame() gxui.Canvas {
 	canvas := stw.driver.CreateCanvas(gxmath.Size{W: stw.CanvasSize[0], H: stw.CanvasSize[1]})
+	if stw.Frame == nil {
+		canvas.Complete()
+		return canvas
+	}
 	pen := gxui.CreatePen(1, gxui.White)
 	font := stw.theme.DefaultFont()
 	stw.Frame.View.Set(1)
