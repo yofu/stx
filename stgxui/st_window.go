@@ -398,14 +398,6 @@ func NewWindow(driver gxui.Driver, theme gxui.Theme, homedir string) *Window {
 	stw.exmodech = make(chan interface{})
 	stw.exmodeend = make(chan int)
 
-	stw.OpenFile("hiroba05.inp")
-
-	stw.Frame.View.Center[0] = float64(stw.CanvasSize[0])*0.5
-	stw.Frame.View.Center[1] = float64(stw.CanvasSize[1])*0.5
-
-	canvas := stw.DrawFrame()
-	stw.draw.SetCanvas(canvas)
-
 	return stw
 }
 
