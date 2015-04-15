@@ -299,9 +299,11 @@ func (stw *Window) initDrawAreaCallback() {
 		case gxui.MouseButtonLeft:
 			fmt.Println("DOUBLE: LEFT", ev.Point.X, ev.Point.Y)
 		case gxui.MouseButtonMiddle:
-			stw.Frame.SetFocus(nil)
-			stw.RedrawNode()
-			stw.ShowCenter()
+			if stw.Frame != nil {
+				stw.Frame.SetFocus(nil)
+				stw.RedrawNode()
+				stw.ShowCenter()
+			}
 		}
 	})
 	stw.draw.OnMouseMove(func (ev gxui.MouseEvent) {
