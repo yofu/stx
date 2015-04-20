@@ -88,8 +88,7 @@ func get2nodes(stw *Window, f func(n *st.Node), fdel func()) {
 				// stw.SetCoord(n.Coord[0], n.Coord[1], n.Coord[2])
 			}
 			///
-			switch stw.downkey {
-			case gxui.MouseButtonMiddle:
+			if ev.State.IsDown(gxui.MouseButtonMiddle) {
 				stw.MoveOrRotate(ev)
 				stw.RedrawNode()
 			}

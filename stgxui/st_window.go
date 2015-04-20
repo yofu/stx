@@ -126,8 +126,6 @@ const (
 	SD_FROMRIGHT
 )
 
-var MouseButtonNil = gxui.MouseButton(-1)
-
 var (
 	EPS = 1e-4
 )
@@ -175,7 +173,6 @@ type Window struct { // {{{
 	startY int
 	endX   int
 	endY   int
-	downkey gxui.MouseButton
 	modifier gxui.KeyboardModifier
 
 	lastcommand     *Command
@@ -274,7 +271,6 @@ func (stw *Window) initCommandLineArea() {
 
 func (stw *Window) initDrawAreaCallback() {
 	stw.draw.OnMouseUp(func (ev gxui.MouseEvent) {
-		stw.downkey = MouseButtonNil
 		if stw.Frame != nil {
 			switch ev.Button {
 			case gxui.MouseButtonLeft:
@@ -290,7 +286,6 @@ func (stw *Window) initDrawAreaCallback() {
 		stw.Redraw()
 	})
 	stw.draw.OnMouseDown(func (ev gxui.MouseEvent) {
-		stw.downkey = ev.Button
 		stw.modifier = ev.Modifier
 		stw.StartSelection(ev)
 	})
@@ -308,17 +303,14 @@ func (stw *Window) initDrawAreaCallback() {
 	})
 	stw.draw.OnMouseMove(func (ev gxui.MouseEvent) {
 		if stw.Frame != nil {
-			switch stw.downkey {
-			default:
-				return
-			case gxui.MouseButtonLeft:
+			if ev.State.IsDown(gxui.MouseButtonLeft) {
 				if stw.modifier.Alt() {
 					stw.SelectNodeMotion(ev)
 				} else {
 					stw.SelectElemMotion(ev)
 				}
 				stw.Redraw()
-			case gxui.MouseButtonMiddle:
+			} else if ev.State.IsDown(gxui.MouseButtonMiddle) {
 				stw.MoveOrRotate(ev)
 				stw.RedrawNode()
 			}
@@ -362,7 +354,6 @@ func NewWindow(driver gxui.Driver, theme gxui.Theme, homedir string) *Window {
 
 	side := stw.sideBar()
 
-	stw.downkey = MouseButtonNil
 	stw.modifier = gxui.ModNone
 
 	stw.draw = theme.CreateImage()
