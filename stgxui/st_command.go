@@ -75,6 +75,7 @@ func get2nodes(stw *Window, f func(n *st.Node), fdel func()) {
 		}
 	})
 	stw.draw.OnMouseMove(func(ev gxui.MouseEvent) {
+		fmt.Println("get2node")
 		if stw.Frame != nil {
 			// Snapping
 			n := stw.PickNode(int(ev.Point.X), int(ev.Point.Y))
