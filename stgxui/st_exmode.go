@@ -491,11 +491,11 @@ func (stw *Window) excommand(command string, pipe bool) error {
 					}
 				}
 			case "$results":
-				mode := st.UPDATE_RESULT
+				mode := st.UpdateResult
 				if _, ok := argdict["ADD"]; ok {
-					mode = st.ADD_RESULT
+					mode = st.AddResult
 					if _, ok2 := argdict["SEARCH"]; ok2 {
-						mode = st.ADDSEARCH_RESULT
+						mode = st.AddSearchResult
 					}
 				}
 				for _, ext := range []string{".otl", ".ohx", ".ohy"} {
@@ -523,11 +523,11 @@ func (stw *Window) excommand(command string, pipe bool) error {
 				return err
 			}
 		case abbrev.For("r/esult", t):
-			mode := st.UPDATE_RESULT
+			mode := st.UpdateResult
 			if _, ok := argdict["ADD"]; ok {
-				mode = st.ADD_RESULT
+				mode = st.AddResult
 				if _, ok2 := argdict["SEARCH"]; ok2 {
-					mode = st.ADDSEARCH_RESULT
+					mode = st.AddSearchResult
 				}
 			}
 			err := stw.Frame.ReadResult(fn, uint(mode))

@@ -802,7 +802,7 @@ func (stw *Window) ReadFile(filename string) error {
 	case ".inl", ".ihx", ".ihy":
 		err = stw.Frame.ReadData(filename)
 	case ".otl", ".ohx", ".ohy":
-		err = stw.Frame.ReadResult(filename, st.UPDATE_RESULT)
+		err = stw.Frame.ReadResult(filename, st.UpdateResult)
 	case ".rat", ".rat2":
 		err = stw.Frame.ReadRat(filename)
 	case ".lst":
