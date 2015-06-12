@@ -2318,6 +2318,68 @@ func (stw *Window) ElemCaptionOff(name string) {
 	}
 }
 
+func (stw *Window) SrcanRateOn(names ...string) {
+	defer func() {
+		if stw.Frame.Show.SrcanRate != 0 {
+			// stw.Labels["SRCAN_RATE"].SetAttribute("FGCOLOR", labelFGColor)
+		}
+	}()
+	if len(names) == 0 {
+		for i, _ := range st.SRCANS {
+			// if lbl, ok := stw.Labels[j]; ok {
+			// 	lbl.SetAttribute("FGCOLOR", labelFGColor)
+			// }
+			if stw.Frame != nil {
+				stw.Frame.Show.SrcanRateOn(1 << uint(i))
+			}
+		}
+		return
+	}
+	for _, name := range names {
+		for i, j := range st.SRCANS {
+			if j == name {
+				// if lbl, ok := stw.Labels[name]; ok {
+				// 	lbl.SetAttribute("FGCOLOR", labelFGColor)
+				// }
+				if stw.Frame != nil {
+					stw.Frame.Show.SrcanRateOn(1 << uint(i))
+				}
+			}
+		}
+	}
+}
+
+func (stw *Window) SrcanRateOff(names ...string) {
+	defer func() {
+		if stw.Frame.Show.SrcanRate == 0 {
+			// stw.Labels["SRCAN_RATE"].SetAttribute("FGCOLOR", labelOFFColor)
+		}
+	}()
+	if len(names) == 0 {
+		for i, _ := range st.SRCANS {
+			// if lbl, ok := stw.Labels[j]; ok {
+			// 	lbl.SetAttribute("FGCOLOR", labelOFFColor)
+			// }
+			if stw.Frame != nil {
+				stw.Frame.Show.SrcanRateOff(1 << uint(i))
+			}
+		}
+		return
+	}
+	for _, name := range names {
+		for i, j := range st.SRCANS {
+			if j == name {
+				// if lbl, ok := stw.Labels[name]; ok {
+				// 	lbl.SetAttribute("FGCOLOR", labelOFFColor)
+				// }
+				if stw.Frame != nil {
+					stw.Frame.Show.SrcanRateOff(1 << uint(i))
+				}
+			}
+		}
+	}
+}
+
 func (stw *Window) StressOn(etype int, index uint) {
 	stw.Frame.Show.Stress[etype] |= (1 << index)
 	// if etype <= st.SLAB {

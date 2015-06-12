@@ -84,14 +84,37 @@ func (stw *Window) fig2keyword(lis []string, un bool) error {
 	switch key {
 	default:
 		if k, ok := stw.Frame.Kijuns[key]; ok {
-			d := k.Direction()
-			var axis int
-			if st.IsParallel(d, st.XAXIS, 1e-4) {
-				axis = 1
-			} else if st.IsParallel(d, st.YAXIS, 1e-4) {
-				axis = 0
+			min := -EPS
+			max := EPS
+			if len(lis) >= 2 {
+				tmp, err := strconv.ParseFloat(lis[1], 64)
+				if err == nil {
+					min = tmp
+				}
 			}
-			axisrange(stw, axis, k.Start[axis], k.Start[axis], false)
+			if len(lis) >= 3 {
+				tmp, err := strconv.ParseFloat(lis[2], 64)
+				if err == nil {
+					max = tmp
+				}
+			}
+			d := k.Direction()
+			if st.IsParallel(d, st.XAXIS, EPS) {
+				axisrange(stw, 1, k.Start[1] + min, k.Start[1] + max, false)
+			} else if st.IsParallel(d, st.YAXIS, EPS) {
+				axisrange(stw, 0, k.Start[0] + min, k.Start[0] + max, false)
+			} else {
+				for _, n := range stw.Frame.Nodes {
+					n.Hide()
+					ok, err := k.Contains(n.Coord, st.ZAXIS, min, max)
+					if err != nil {
+						continue
+					}
+					if ok {
+						n.Show()
+					}
+				}
+			}
 			return nil
 		}
 		stw.ErrorMessage(errors.New(fmt.Sprintf("no fig2 keyword: %s", key)), INFO)
@@ -247,6 +270,16 @@ func (stw *Window) fig2keyword(lis []string, un bool) error {
 			return err
 		}
 		stw.Frame.Show.Rfact = val
+	case "qfact":
+		if len(lis) < 2 {
+			return st.NotEnoughArgs("QFACT")
+		}
+		val, err := strconv.ParseFloat(lis[1], 64)
+		if err != nil {
+			return err
+		}
+		stw.Frame.Show.Qfact = val
+		// stw.Labels["QFACT"].SetAttribute("VALUE", fmt.Sprintf("%f", val))
 	case "mfact":
 		if len(lis) < 2 {
 			return st.NotEnoughArgs("MFACT")
@@ -511,33 +544,42 @@ func (stw *Window) fig2keyword(lis []string, un bool) error {
 			stw.History("'srcanrate [long/short]")
 			return nil
 		}
-		long := true
-		short := true
-		if len(lis) > 2 {
-			if strings.EqualFold(lis[1], "long") {
-				short = false
-			} else if strings.EqualFold(lis[1], "short") {
-				long = false
+		onoff := []bool{false, false, false, false} // long, short, q, m
+		if len(lis) >= 2 {
+			for _, str := range lis[1:] {
+				switch {
+				case strings.EqualFold(str, "long"):
+					onoff[0] = true
+				case strings.EqualFold(str, "short"):
+					onoff[1] = true
+				case strings.EqualFold(str, "q"):
+					onoff[2] = true
+				case strings.EqualFold(str, "m"):
+					onoff[3] = true
+				}
 			}
 		}
+		if onoff[0] == false && onoff[1] == false {
+			onoff[0] = true
+			onoff[1] = true
+		}
+		if onoff[2] == false && onoff[3] == false {
+			onoff[2] = true
+			onoff[3] = true
+		}
+		names := make([]string, 4)
+		ind := 0
+		for i:=0; i<4; i++ {
+			if onoff[i] {
+				names[ind] = st.SRCANS[i]
+				ind++
+			}
+		}
+		names = names[:ind]
 		if un {
-			if long {
-				stw.ElemCaptionOff("EC_RATE_L")
-				// stw.Labels["EC_RATE_L"].SetAttribute("FGCOLOR", labelOFFColor)
-			}
-			if short {
-				stw.ElemCaptionOff("EC_RATE_S")
-				// stw.Labels["EC_RATE_S"].SetAttribute("FGCOLOR", labelOFFColor)
-			}
+			stw.SrcanRateOff(names...)
 		} else {
-			if long {
-				stw.ElemCaptionOn("EC_RATE_L")
-				// stw.Labels["EC_RATE_L"].SetAttribute("FGCOLOR", labelFGColor)
-			}
-			if short {
-				stw.ElemCaptionOn("EC_RATE_S")
-				// stw.Labels["EC_RATE_S"].SetAttribute("FGCOLOR", labelFGColor)
-			}
+			stw.SrcanRateOn(names...)
 		}
 	case "stress":
 		if usage {
@@ -571,6 +613,8 @@ func (stw *Window) fig2keyword(lis []string, un bool) error {
 			etype = st.WBRACE
 		case abbrev.For("sb/race", et):
 			etype = st.SBRACE
+		case abbrev.For("tr/uss", et):
+			etype = st.TRUSS
 		case abbrev.For("wa/ll", et):
 			etype = st.WALL
 		case abbrev.For("sl/ab", et):
@@ -696,6 +740,36 @@ func (stw *Window) fig2keyword(lis []string, un bool) error {
 				stw.ElemCaptionOff("EC_STIFF_Y")
 			} else {
 				stw.ElemCaptionOn("EC_STIFF_Y")
+			}
+		}
+	case "drift":
+		if usage {
+			stw.History("'drift [x,y]")
+			return nil
+		}
+		if len(lis) < 2 {
+			if un {
+				stw.ElemCaptionOff("EC_DRIFT_X")
+				stw.ElemCaptionOff("EC_DRIFT_Y")
+				return nil
+			} else {
+				return st.NotEnoughArgs("drift")
+			}
+		}
+		switch strings.ToUpper(lis[1]) {
+		default:
+			return errors.New("unknown period")
+		case "X":
+			if un {
+				stw.ElemCaptionOff("EC_DRIFT_X")
+			} else {
+				stw.ElemCaptionOn("EC_DRIFT_X")
+			}
+		case "Y":
+			if un {
+				stw.ElemCaptionOff("EC_DRIFT_Y")
+			} else {
+				stw.ElemCaptionOn("EC_DRIFT_Y")
 			}
 		}
 	case "deformation":
@@ -885,6 +959,9 @@ func (stw *Window) fig2keyword(lis []string, un bool) error {
 		stw.SelectElem = stw.Frame.Fence(axis, val, false)
 		stw.HideNotSelected()
 	case "period":
+		if len(lis) < 2 {
+			return st.NotEnoughArgs("PERIOD")
+		}
 		stw.SetPeriod(strings.ToUpper(lis[1]))
 	case "period++":
 		stw.IncrementPeriod(1)
@@ -908,11 +985,29 @@ func (stw *Window) fig2keyword(lis []string, un bool) error {
 		} else {
 			stw.Frame.Show.NoLegend = true
 		}
+	case "noshearvalue":
+		if un {
+			stw.Frame.Show.NoShearValue = false
+		} else {
+			stw.Frame.Show.NoShearValue = true
+		}
 	case "nomomentvalue":
 		if un {
 			stw.Frame.Show.NoMomentValue = false
 		} else {
 			stw.Frame.Show.NoMomentValue = true
+		}
+	case "sheararrow":
+		if un {
+			stw.Frame.Show.ShearArrow = false
+		} else {
+			stw.Frame.Show.ShearArrow = true
+		}
+	case "momentfigure":
+		if un {
+			stw.Frame.Show.MomentFigure = false
+		} else {
+			stw.Frame.Show.MomentFigure = true
 		}
 	case "ncolor":
 		stw.SetColorMode(st.ECOLOR_N)
