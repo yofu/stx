@@ -56,6 +56,8 @@ var (
 
 const LOGFILE = "_st.log"
 
+const ResourceFileName = ".strc"
+
 var (
 	LOGLEVEL = []string{"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
 )
@@ -116,6 +118,10 @@ const (
 	CanvasMoveSpeedY   = 0.05
 	CanvasScaleSpeed   = 500
 )
+var (
+	CanvasFitScale     = 0.9
+)
+
 
 var selectDirection = 0
 
@@ -190,6 +196,7 @@ type Window struct { // {{{
 	comhist     []string
 	recentfiles []string
 	undostack   []*st.Frame
+	taggedFrame map[string]*st.Frame
 }
 
 // }}}
@@ -392,6 +399,7 @@ func NewWindow(driver gxui.Driver, theme gxui.Theme, homedir string) *Window {
 	stw.recentfiles = make([]string, nRecentFiles)
 	stw.SetRecently()
 	stw.undostack = make([]*st.Frame, nUndo)
+	stw.taggedFrame = make(map[string]*st.Frame)
 	undopos = 0
 	StartLogging()
 	stw.exmodech = make(chan interface{})
@@ -458,7 +466,7 @@ func (stw *Window) ShowAtCanvasCenter() {
 		return
 	}
 	stw.SetCanvasSize()
-	scale := math.Min(float64(stw.CanvasSize[0])/(xmax-xmin), float64(stw.CanvasSize[1])/(ymax-ymin)) * 0.9
+	scale := math.Min(float64(stw.CanvasSize[0])/(xmax-xmin), float64(stw.CanvasSize[1])/(ymax-ymin)) * CanvasFitScale
 	if stw.Frame.View.Perspective {
 		stw.Frame.View.Dists[1] *= scale
 	} else {
@@ -545,7 +553,7 @@ func (stw *Window) SaveFile(fn string) error {
 		}
 		xmin, xmax, ymin, ymax := stw.Bbox()
 		stw.SetCanvasSize()
-		scale := math.Min(float64(stw.CanvasSize[0])/(xmax-xmin), float64(stw.CanvasSize[1])/(ymax-ymin)) * 0.9
+		scale := math.Min(float64(stw.CanvasSize[0])/(xmax-xmin), float64(stw.CanvasSize[1])/(ymax-ymin)) * CanvasFitScale
 		stw.Frame.View.Dists[1] *= scale
 	}
 	err := stw.Frame.WriteInp(fn)
@@ -571,7 +579,7 @@ func (stw *Window) SaveFileSelected(fn string, els []*st.Elem) error {
 		}
 		xmin, xmax, ymin, ymax := stw.Bbox()
 		stw.SetCanvasSize()
-		scale := math.Min(float64(stw.CanvasSize[0])/(xmax-xmin), float64(stw.CanvasSize[1])/(ymax-ymin)) * 0.9
+		scale := math.Min(float64(stw.CanvasSize[0])/(xmax-xmin), float64(stw.CanvasSize[1])/(ymax-ymin)) * CanvasFitScale
 		stw.Frame.View.Dists[1] *= scale
 	}
 	err := st.WriteInp(fn, stw.Frame.View, stw.Frame.Ai, els)
@@ -600,7 +608,7 @@ func (stw *Window) Close(force bool) {
 func (stw *Window) Open() {
 	name := "hogtxt.inp"
 	// if name, ok := iup.GetOpenFile(stw.Cwd, "*.inp"); ok {
-	err := stw.OpenFile(name)
+	err := stw.OpenFile(name, true)
 	if err != nil {
 		fmt.Println(err)
 	}
@@ -688,14 +696,14 @@ func (stw *Window) Reload() {
 		stw.Deselect()
 		v := stw.Frame.View
 		s := stw.Frame.Show
-		stw.OpenFile(stw.Frame.Path)
+		stw.OpenFile(stw.Frame.Path, false)
 		stw.Frame.View = v
 		stw.Frame.Show = s
 		stw.Redraw()
 	}
 }
 
-func (stw *Window) OpenFile(filename string) error {
+func (stw *Window) OpenFile(filename string, readrcfile bool) error {
 	var err error
 	var s *st.Show
 	fn := st.ToUtf8string(filename)
@@ -741,6 +749,11 @@ func (stw *Window) OpenFile(filename string) error {
 	stw.Snapshot()
 	stw.Changed = false
 	// stw.HideLogo()
+	if readrcfile {
+		if rcfn := filepath.Join(stw.Cwd, ResourceFileName); st.FileExists(rcfn) {
+			stw.ReadResource(rcfn)
+		}
+	}
 	return nil
 }
 
@@ -839,7 +852,7 @@ func (stw *Window) PrintSVG(filename string) error {
 	return nil
 }
 
-func (stw *Window) Complete(str string) string {
+func (stw *Window) CompleteFileName(str string) string {
 	envval := regexp.MustCompile("[$]([a-zA-Z]+)")
 	if envval.MatchString(str) {
 		efs := envval.FindStringSubmatch(str)
@@ -2069,7 +2082,7 @@ func (stw *Window) Deselect() {
 
 // Show&Hide
 func (stw *Window) SetShowRange() {
-	xmin, xmax, ymin, ymax, zmin, zmax := stw.Frame.Bbox()
+	xmin, xmax, ymin, ymax, zmin, zmax := stw.Frame.Bbox(true)
 	stw.Frame.Show.Xrange[0] = xmin
 	stw.Frame.Show.Xrange[1] = xmax
 	stw.Frame.Show.Yrange[0] = ymin
@@ -2396,13 +2409,13 @@ func (stw *Window) ShapeData(sh st.Shape) {
 	tb.Value = strings.Split(otp.String(), "\n")
 }
 
-func (stw *Window) Vim(fn string) {
+func  Vim(fn string) {
 	cmd := exec.Command("gvim", fn)
 	cmd.Start()
 }
-func (stw *Window) EditReadme(dir string) {
+func  EditReadme(dir string) {
 	fn := filepath.Join(dir, "readme.txt")
-	stw.Vim(fn)
+	Vim(fn)
 }
 
 func min(x, y int) int {
@@ -2418,4 +2431,24 @@ func max(x, y int) int {
 	} else {
 		return y
 	}
+}
+
+func (stw *Window) ReadResource(filename string) error {
+	f, err := os.Open(filename)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	s := bufio.NewScanner(f)
+	for s.Scan() {
+		txt := s.Text()
+		if strings.HasPrefix(txt, "#") {
+			continue
+		}
+		stw.execAliasCommand(txt)
+	}
+	if err := s.Err(); err != nil {
+		return err
+	}
+	return nil
 }
