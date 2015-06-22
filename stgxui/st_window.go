@@ -390,6 +390,12 @@ func NewWindow(driver gxui.Driver, theme gxui.Theme, homedir string) *Window {
 	stw.dlg = theme.CreateWindow(1200, 900, "stx")
 	stw.dlg.AddChild(vsp)
 	stw.dlg.OnClose(driver.Terminate)
+	stw.dlg.OnKeyDown(func (ev gxui.KeyboardEvent) {
+		if _, ok := stw.dlg.Focus().(gxui.TextBox); ok {
+			return
+		}
+		stw.dlg.SetFocus(stw.cline)
+	})
 
 	stw.SetCanvasSize()
 
