@@ -243,6 +243,7 @@ func (stw *Window) sideBar() gxui.PanelHolder {
 func (stw *Window) initHistoryArea() {
 	stw.history = stw.theme.CreateTextBox()
 	stw.history.SetMultiline(true)
+	stw.history.SetFocusable(false)
 	stw.history.SetDesiredWidth(800)
 }
 
