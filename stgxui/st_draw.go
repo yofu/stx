@@ -401,19 +401,58 @@ func DrawNode(node *st.Node, cvs gxui.Canvas, pen gxui.Pen, font gxui.Font, txtc
 	}
 	// Conffigure
 	if show.Conf {
-		// switch node.ConfState() {
-		// default:
-		// 	return
-		// case st.CONF_PIN:
-		// 	PinFigure(cvs, node.Pcoord[0], node.Pcoord[1], show.ConfSize)
-		// case st.CONF_XROL, st.CONF_YROL, st.CONF_XYROL:
-		// 	RollerFigure(cvs, node.Pcoord[0], node.Pcoord[1], show.ConfSize, 0)
-		// case st.CONF_ZROL:
-		// 	RollerFigure(cvs, node.Pcoord[0], node.Pcoord[1], show.ConfSize, 1)
-		// case st.CONF_FIX:
-		// 	FixFigure(cvs, node.Pcoord[0], node.Pcoord[1], show.ConfSize)
-		// }
+		switch node.ConfState() {
+		default:
+			return
+		case st.CONF_PIN:
+			PinFigure(cvs, node.Pcoord[0], node.Pcoord[1], show.ConfSize)
+		case st.CONF_XROL, st.CONF_YROL, st.CONF_XYROL:
+			RollerFigure(cvs, node.Pcoord[0], node.Pcoord[1], show.ConfSize, 0)
+		case st.CONF_ZROL:
+			RollerFigure(cvs, node.Pcoord[0], node.Pcoord[1], show.ConfSize, 1)
+		case st.CONF_FIX:
+			FixFigure(cvs, node.Pcoord[0], node.Pcoord[1], show.ConfSize)
+		}
 	}
+}
+
+func PinFigure(cvs gxui.Canvas, x, y, size float64) {
+	val := y + 0.5*math.Sqrt(3)*size
+	vers := make([][]int, 3)
+	vers[0] = []int{int(x), int(y)}
+	vers[1] = []int{int(x+0.5*size), int(val)}
+	vers[2] = []int{int(x-0.5*size), int(val)}
+	Polygon(cvs, gxui.WhitePen, gxui.WhiteBrush, vers)
+}
+
+func RollerFigure(cvs gxui.Canvas, x, y, size float64, direction int) {
+	switch direction {
+	case 0:
+		val1 := y + 0.5*math.Sqrt(3)*size
+		val2 := y + 0.75*math.Sqrt(3)*size
+		vers := make([][]int, 3)
+		vers[0] = []int{int(x), int(y)}
+		vers[1] = []int{int(x+0.5*size), int(val1)}
+		vers[2] = []int{int(x-0.5*size), int(val1)}
+		Polygon(cvs, gxui.WhitePen, gxui.WhiteBrush, vers)
+		Line(cvs, gxui.WhitePen, int(x-0.5*size), int(val2), int(x+0.5*size), int(val2))
+	case 1:
+		val1 := x - 0.5*math.Sqrt(3)*size
+		val2 := x - 0.75*math.Sqrt(3)*size
+		vers := make([][]int, 3)
+		vers[0] = []int{int(x), int(y)}
+		vers[1] = []int{int(val1), int(y+0.5*size)}
+		vers[2] = []int{int(val1), int(y-0.5*size)}
+		Polygon(cvs, gxui.WhitePen, gxui.WhiteBrush, vers)
+		Line(cvs, gxui.WhitePen, int(val2), int(y-0.5*size), int(val2), int(y+0.5*size))
+	}
+}
+
+func FixFigure(cvs gxui.Canvas, x, y, size float64) {
+	Line(cvs, gxui.WhitePen, int(x-size), int(y), int(x+size), int(y))
+	Line(cvs, gxui.WhitePen, int(x-0.25*size), int(y), int(x-0.75*size), int(y+0.5*size))
+	Line(cvs, gxui.WhitePen, int(x+0.25*size), int(y), int(x-0.25*size), int(y+0.5*size))
+	Line(cvs, gxui.WhitePen, int(x+0.75*size), int(y), int(x+0.25*size), int(y+0.5*size))
 }
 
 func DrawElem(elem *st.Elem, cvs gxui.Canvas, pen gxui.Pen, font gxui.Font, txtcolor gxui.Color, selected bool, show *st.Show) {
