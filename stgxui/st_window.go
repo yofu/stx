@@ -120,6 +120,7 @@ const (
 )
 var (
 	CanvasFitScale     = 0.9
+	CanvasAnimateSpeed    = 0.02
 )
 
 
@@ -473,23 +474,105 @@ func (stw *Window) SetCanvasSize() {
 	stw.CanvasSize[1] = size.H
 }
 
-func (stw *Window) ShowAtCanvasCenter() {
+func (stw *Window) Animate(view *st.View) {
+	scale := 1.0
+	if stw.Frame.View.Perspective {
+		scale = math.Pow(view.Dists[1] / stw.Frame.View.Dists[1], CanvasAnimateSpeed)
+	} else {
+		scale = math.Pow(view.Gfact / stw.Frame.View.Gfact, CanvasAnimateSpeed)
+	}
+	center := make([]float64, 2)
+	angle := make([]float64, 2)
+	focus := make([]float64, 3)
+	for i:=0; i<3; i++ {
+		focus[i] = CanvasAnimateSpeed*(view.Focus[i] - stw.Frame.View.Focus[i])
+		if i >= 2 {
+			break
+		}
+		center[i] = CanvasAnimateSpeed*(view.Center[i] - stw.Frame.View.Center[i])
+		angle[i] = view.Angle[i] - stw.Frame.View.Angle[i]
+		if i == 1 {
+			for {
+				if angle[1] <= 180.0 {
+					break
+				}
+				angle[1] -= 360.0
+			}
+			for {
+				if angle[1] >= -180.0 {
+					break
+				}
+				angle[1] += 360.0
+			}
+		}
+		angle[i] *= CanvasAnimateSpeed
+	}
+	for i:=0; i<int(1/CanvasAnimateSpeed); i++ {
+		if stw.Frame.View.Perspective {
+			stw.Frame.View.Dists[1] *= scale
+		} else {
+			stw.Frame.View.Gfact *= scale
+		}
+		for j:=0; j<3; j++ {
+			stw.Frame.View.Focus[j] += focus[j]
+			if j >= 2 {
+				break
+			}
+			stw.Frame.View.Center[j] += center[j]
+			stw.Frame.View.Angle[j] += angle[j]
+		}
+		stw.RedrawNode() // TODO: not working
+	}
+}
+
+func (stw *Window) CanvasCenterView(angle []float64) *st.View {
+	a0 := make([]float64, 2)
+	f0 := make([]float64, 3)
+	focus := make([]float64, 3)
+	for i:=0; i<3; i++ {
+		f0[i] = stw.Frame.View.Focus[i]
+		if i >= 2 {
+			break
+		}
+		a0[i] = stw.Frame.View.Angle[i]
+		stw.Frame.View.Angle[i] = angle[i]
+	}
+	stw.Frame.SetFocus(nil)
+	stw.Frame.View.Set(0)
 	for _, n := range stw.Frame.Nodes {
 		stw.Frame.View.ProjectNode(n)
 	}
 	xmin, xmax, ymin, ymax := stw.Bbox()
-	if xmax == xmin && ymax == ymin {
-		return
-	}
 	stw.SetCanvasSize()
+	for i:=0; i<3; i++ {
+		focus[i] = stw.Frame.View.Focus[i]
+		stw.Frame.View.Focus[i] = f0[i]
+		if i >= 2 {
+			break
+		}
+		stw.Frame.View.Angle[i] = a0[i]
+	}
+	stw.Frame.View.Set(0)
+	if xmax == xmin && ymax == ymin {
+		return nil
+	}
+	view := stw.Frame.View.Copy()
+	view.Focus = focus
 	scale := math.Min(float64(stw.CanvasSize[0])/(xmax-xmin), float64(stw.CanvasSize[1])/(ymax-ymin)) * CanvasFitScale
 	if stw.Frame.View.Perspective {
-		stw.Frame.View.Dists[1] *= scale
+		view.Dists[1] = stw.Frame.View.Dists[1] * scale
 	} else {
-		stw.Frame.View.Gfact *= scale
+		view.Gfact = stw.Frame.View.Gfact * scale
 	}
-	stw.Frame.View.Center[0] = float64(stw.CanvasSize[0])*0.5 + scale*(stw.Frame.View.Center[0]-0.5*(xmax+xmin))
-	stw.Frame.View.Center[1] = float64(stw.CanvasSize[1])*0.5 + scale*(stw.Frame.View.Center[1]-0.5*(ymax+ymin))
+	view.Center[0] = float64(stw.CanvasSize[0])*0.5 + scale*(stw.Frame.View.Center[0]-0.5*(xmax+xmin))
+	view.Center[1] = float64(stw.CanvasSize[1])*0.5 + scale*(stw.Frame.View.Center[1]-0.5*(ymax+ymin))
+	view.Angle = angle
+	return view
+}
+
+func (stw *Window) ShowAtCanvasCenter() {
+	view := stw.CanvasCenterView(stw.Frame.View.Angle)
+	stw.Animate(view)
 }
 
 func (stw *Window) ShowCenter() {
@@ -499,10 +582,8 @@ func (stw *Window) ShowCenter() {
 
 func (stw *Window) SetAngle(phi, theta float64) {
 	if stw.Frame != nil {
-		stw.Frame.View.Angle[0] = phi
-		stw.Frame.View.Angle[1] = theta
-		stw.Redraw()
-		stw.ShowCenter()
+		view := stw.CanvasCenterView([]float64{phi, theta})
+		stw.Animate(view)
 	}
 }
 
