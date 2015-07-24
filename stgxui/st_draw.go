@@ -8,6 +8,7 @@ import (
 	"github.com/yofu/st/stlib"
 	"github.com/yofu/st/arclm"
 	"math"
+	"sort"
 )
 
 const (
@@ -219,7 +220,14 @@ func (stw *Window) DrawFrameNode() gxui.Canvas {
 	pen := gxui.CreatePen(1, gxui.White)
 	font := stw.theme.DefaultFont()
 	stw.Frame.View.Set(1)
+	nodes := make([]*st.Node, len(stw.Frame.Nodes))
+	i := 0
 	for _, n := range stw.Frame.Nodes {
+		nodes[i] = n
+		i++
+	}
+	sort.Sort(st.NodeByNum{nodes})
+	for _, n := range nodes {
 		stw.Frame.View.ProjectNode(n)
 		if stw.Frame.Show.Deformation {
 			stw.Frame.View.ProjectDeformation(n, stw.Frame.Show)
@@ -260,7 +268,14 @@ func (stw *Window) DrawFrame() gxui.Canvas {
 	pen := gxui.CreatePen(1, gxui.White)
 	font := stw.theme.DefaultFont()
 	stw.Frame.View.Set(1)
+	nodes := make([]*st.Node, len(stw.Frame.Nodes))
+	i := 0
 	for _, n := range stw.Frame.Nodes {
+		nodes[i] = n
+		i++
+	}
+	sort.Sort(st.NodeByNum{nodes})
+	for _, n := range nodes {
 		stw.Frame.View.ProjectNode(n)
 		if stw.Frame.Show.Deformation {
 			stw.Frame.View.ProjectDeformation(n, stw.Frame.Show)
