@@ -2076,6 +2076,23 @@ func (stw *Window) TailPolygon(ns []*st.Node, ev gxui.MouseEvent) {
 	stw.endY = ev.Point.Y
 }
 
+func (stw *Window) SelectNotHidden() {
+	if stw.Frame == nil {
+		return
+	}
+	stw.Deselect()
+	stw.SelectElem = make([]*st.Elem, len(stw.Frame.Elems))
+	num := 0
+	for _, el := range stw.Frame.Elems {
+		if el.IsHidden(stw.Frame.Show) {
+			continue
+		}
+		stw.SelectElem[num] = el
+		num++
+	}
+	stw.SelectElem = stw.SelectElem[:num]
+}
+
 func (stw *Window) Deselect() {
 	stw.SelectNode = make([]*st.Node, 0)
 	stw.SelectElem = make([]*st.Elem, 0)
