@@ -317,7 +317,7 @@ func (stw *Window) initDrawAreaCallback() {
 				} else {
 					stw.SelectElemMotion(ev)
 				}
-				stw.Redraw()
+				stw.RedrawNode()
 			} else if ev.State.IsDown(gxui.MouseButtonMiddle) {
 				stw.MoveOrRotate(ev)
 				stw.RedrawNode()

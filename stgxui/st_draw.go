@@ -263,7 +263,7 @@ func (stw *Window) DrawFrameNode() gxui.Canvas {
 				if el.IsHidden(stw.Frame.Show) {
 					pen = gxui.CreatePen(1, gxui.Gray90)
 				} else {
-					pen = gxui.CreatePen(1, gxui.Green20)
+					pen = gxui.CreatePen(1, gxui.Green30)
 				}
 				DrawElemLine(el, canvas, pen)
 				m.Unlock()
@@ -282,6 +282,9 @@ func (stw *Window) DrawFrameNode() gxui.Canvas {
 			DrawElem(el, canvas, pen, font, gxui.White, true, stw.Frame.Show)
 		}
 		stw.Frame.Show.NoMomentValue = nomv
+	}
+	if stw.rubber != nil && stw.rubber.IsComplete() {
+		canvas.DrawCanvas(stw.rubber, gxmath.Point{X: 0, Y: 0})
 	}
 	canvas.Complete()
 	return canvas
@@ -419,9 +422,6 @@ func (stw *Window) DrawFrame() gxui.Canvas {
 			DrawElem(el, canvas, pen, font, gxui.White, true, stw.Frame.Show)
 		}
 		stw.Frame.Show.NoMomentValue = nomv
-	}
-	if stw.rubber != nil && stw.rubber.IsComplete() {
-		canvas.DrawCanvas(stw.rubber, gxmath.Point{X: 0, Y: 0})
 	}
 	canvas.Complete()
 	return canvas
