@@ -179,7 +179,6 @@ type Window struct { // {{{
 	startY int
 	endX   int
 	endY   int
-	modifier gxui.KeyboardModifier
 
 	lastcommand     *Command
 	lastexcommand   string
@@ -282,7 +281,7 @@ func (stw *Window) initDrawAreaCallback() {
 		if stw.Frame != nil {
 			switch ev.Button {
 			case gxui.MouseButtonLeft:
-				if stw.modifier.Alt() {
+				if ev.Modifier.Alt() {
 					stw.SelectNodeUp(ev)
 				} else {
 					stw.SelectElemUp(ev)
@@ -294,7 +293,6 @@ func (stw *Window) initDrawAreaCallback() {
 		stw.Redraw()
 	})
 	stw.draw.OnMouseDown(func (ev gxui.MouseEvent) {
-		stw.modifier = ev.Modifier
 		stw.StartSelection(ev)
 	})
 	stw.draw.OnDoubleClick(func (ev gxui.MouseEvent) {
@@ -312,7 +310,7 @@ func (stw *Window) initDrawAreaCallback() {
 	stw.draw.OnMouseMove(func (ev gxui.MouseEvent) {
 		if stw.Frame != nil {
 			if ev.State.IsDown(gxui.MouseButtonLeft) {
-				if stw.modifier.Alt() {
+				if ev.Modifier.Alt() {
 					stw.SelectNodeMotion(ev)
 				} else {
 					stw.SelectElemMotion(ev)
@@ -361,8 +359,6 @@ func NewWindow(driver gxui.Driver, theme gxui.Theme, homedir string) *Window {
 	sidedraw.SetOrientation(gxui.Horizontal)
 
 	side := stw.sideBar()
-
-	stw.modifier = gxui.ModNone
 
 	stw.draw = theme.CreateImage()
 	stw.initDrawAreaCallback()
@@ -498,7 +494,7 @@ func (stw *Window) SetAngle(phi, theta float64) {
 }
 
 func (stw *Window) MoveOrRotate(ev gxui.MouseEvent) {
-	if !fixMove && (stw.modifier.Shift() || fixRotate) {
+	if !fixMove && (ev.Modifier.Shift() || fixRotate) {
 		stw.Frame.View.Center[0] += float64(ev.Point.X-stw.startX) * CanvasMoveSpeedX
 		stw.Frame.View.Center[1] += float64(ev.Point.Y-stw.startY) * CanvasMoveSpeedY
 	} else if !fixRotate {
