@@ -1988,7 +1988,7 @@ func (stw *Window) SelectNodeMotion(ev gxui.MouseEvent) {
 		Rect(stw.rubber, RubberPenNode, RubberBrushNode, int(ev.Point.X), stw.startX, min(stw.startY, int(ev.Point.Y)), max(stw.startY, int(ev.Point.Y)))
 		stw.rubber.Complete()
 		stw.endX = ev.Point.X
-		stw.endY = ev.Point.X
+		stw.endY = ev.Point.Y
 	} else {
 		selectDirection = SD_FROMRIGHT
 		if stw.rubber != nil {
