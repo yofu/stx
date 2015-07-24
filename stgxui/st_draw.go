@@ -9,6 +9,7 @@ import (
 	"github.com/yofu/st/arclm"
 	"math"
 	"sort"
+	"sync"
 )
 
 const (
@@ -235,18 +236,45 @@ func (stw *Window) DrawFrameNode() gxui.Canvas {
 		if n.IsHidden(stw.Frame.Show) {
 			continue
 		}
-		txtcolor := gxui.White
+		txtcolor := gxui.Green90
 		for _, j := range stw.SelectNode {
 			if j == n {
-				txtcolor = gxui.Red
+				DrawNode(n, canvas, pen, font, txtcolor, stw.Frame.Show)
 				break
 			}
 		}
-		DrawNode(n, canvas, pen, font, txtcolor, stw.Frame.Show)
+	}
+	if !stw.Frame.Show.Select {
+		var wg sync.WaitGroup
+		var m sync.Mutex
+		for _, elem := range stw.Frame.Elems {
+			wg.Add(1)
+			go func(el *st.Elem) {
+				defer wg.Done()
+				if el.Etype >= st.WBRACE || el.Etype < st.COLUMN {
+					return
+				}
+				for _, j := range stw.SelectElem {
+					if j == el {
+						return
+					}
+				}
+				m.Lock()
+				if el.IsHidden(stw.Frame.Show) {
+					pen = gxui.CreatePen(1, gxui.Gray90)
+				} else {
+					pen = gxui.CreatePen(1, gxui.Green20)
+				}
+				DrawElemLine(el, canvas, pen)
+				m.Unlock()
+			}(elem)
+		}
+		wg.Wait()
 	}
 	if stw.SelectElem != nil {
 		nomv := stw.Frame.Show.NoMomentValue
 		stw.Frame.Show.NoMomentValue = false
+		pen = gxui.CreatePen(1, gxui.Green90)
 		for _, el := range stw.SelectElem {
 			if el == nil || el.IsHidden(stw.Frame.Show) {
 				continue
@@ -304,6 +332,43 @@ func (stw *Window) DrawFrame() gxui.Canvas {
 					continue loop
 				}
 			}
+			switch stw.Frame.Show.ColorMode {
+			case st.ECOLOR_WHITE:
+				pen = gxui.WhitePen
+			case st.ECOLOR_BLACK:
+				pen = gxui.DefaultPen
+			case st.ECOLOR_SECT:
+				pen = Pen(el.Sect.Color, true)
+			case st.ECOLOR_RATE:
+				val, err := el.RateMax(stw.Frame.Show)
+				if err != nil {
+					pen = Pen(st.GREY_500, true)
+				} else {
+					pen = Pen(st.Rainbow(val, st.RateBoundary), true)
+				}
+			case st.ECOLOR_N:
+				if el.N(stw.Frame.Show.Period, 0) >= 0.0 {
+					pen = Pen(st.RainbowColor[0], true) // Compression: Blue
+				} else {
+					pen = Pen(st.RainbowColor[6], true) // Tension: Red
+				}
+			case st.ECOLOR_STRONG:
+				Ix, err := el.Sect.Ix(0)
+				if err != nil {
+					pen = gxui.WhitePen
+				}
+				Iy, err := el.Sect.Iy(0)
+				if err != nil {
+					pen = gxui.WhitePen
+				}
+				if Ix > Iy {
+					pen = Pen(st.RainbowColor[0], true) // Strong: Blue
+				} else if Ix == Iy {
+					pen = Pen(st.RainbowColor[4], true) // Same: Yellow
+				} else {
+					pen = Pen(st.RainbowColor[6], true) // Weak: Red
+				}
+			}
 			DrawElem(el, canvas, pen, font, gxui.White, false, stw.Frame.Show)
 		}
 	}
@@ -313,6 +378,43 @@ func (stw *Window) DrawFrame() gxui.Canvas {
 		for _, el := range stw.SelectElem {
 			if el == nil || el.IsHidden(stw.Frame.Show) {
 				continue
+			}
+			switch stw.Frame.Show.ColorMode {
+			case st.ECOLOR_WHITE:
+				pen = gxui.WhitePen
+			case st.ECOLOR_BLACK:
+				pen = gxui.DefaultPen
+			case st.ECOLOR_SECT:
+				pen = Pen(el.Sect.Color, true)
+			case st.ECOLOR_RATE:
+				val, err := el.RateMax(stw.Frame.Show)
+				if err != nil {
+					pen = Pen(st.GREY_500, true)
+				} else {
+					pen = Pen(st.Rainbow(val, st.RateBoundary), true)
+				}
+			case st.ECOLOR_N:
+				if el.N(stw.Frame.Show.Period, 0) >= 0.0 {
+					pen = Pen(st.RainbowColor[0], true) // Compression: Blue
+				} else {
+					pen = Pen(st.RainbowColor[6], true) // Tension: Red
+				}
+			case st.ECOLOR_STRONG:
+				Ix, err := el.Sect.Ix(0)
+				if err != nil {
+					pen = gxui.WhitePen
+				}
+				Iy, err := el.Sect.Iy(0)
+				if err != nil {
+					pen = gxui.WhitePen
+				}
+				if Ix > Iy {
+					pen = Pen(st.RainbowColor[0], true) // Strong: Blue
+				} else if Ix == Iy {
+					pen = Pen(st.RainbowColor[4], true) // Same: Yellow
+				} else {
+					pen = Pen(st.RainbowColor[6], true) // Weak: Red
+				}
 			}
 			DrawElem(el, canvas, pen, font, gxui.White, true, stw.Frame.Show)
 		}
@@ -537,43 +639,6 @@ func DrawElem(elem *st.Elem, cvs gxui.Canvas, pen gxui.Pen, font gxui.Font, txtc
 		Text(cvs, font, txtcolor, int(textpos[0]), int(textpos[1]), ecap.String())
 	}
 	if elem.IsLineElem() {
-		switch show.ColorMode {
-		case st.ECOLOR_WHITE:
-			pen = gxui.WhitePen
-		case st.ECOLOR_BLACK:
-			pen = gxui.DefaultPen
-		case st.ECOLOR_SECT:
-			pen = Pen(elem.Sect.Color, selected)
-		case st.ECOLOR_RATE:
-			val, err := elem.RateMax(show)
-			if err != nil {
-				pen = Pen(st.GREY_500, selected)
-			} else {
-				pen = Pen(st.Rainbow(val, st.RateBoundary), selected)
-			}
-		case st.ECOLOR_N:
-			if elem.N(show.Period, 0) >= 0.0 {
-				pen = Pen(st.RainbowColor[0], selected) // Compression: Blue
-			} else {
-				pen = Pen(st.RainbowColor[6], selected) // Tension: Red
-			}
-		case st.ECOLOR_STRONG:
-			Ix, err := elem.Sect.Ix(0)
-			if err != nil {
-				pen = gxui.WhitePen
-			}
-			Iy, err := elem.Sect.Iy(0)
-			if err != nil {
-				pen = gxui.WhitePen
-			}
-			if Ix > Iy {
-				pen = Pen(st.RainbowColor[0], selected) // Strong: Blue
-			} else if Ix == Iy {
-				pen = Pen(st.RainbowColor[4], selected) // Same: Yellow
-			} else {
-				pen = Pen(st.RainbowColor[6], selected) // Weak: Red
-			}
-		}
 		Line(cvs, pen, int(elem.Enod[0].Pcoord[0]), int(elem.Enod[0].Pcoord[1]), int(elem.Enod[1].Pcoord[0]), int(elem.Enod[1].Pcoord[1]))
 		pd := elem.PDirection(true)
 		if show.Bond {
@@ -766,3 +831,6 @@ func DrawElem(elem *st.Elem, cvs gxui.Canvas, pen gxui.Pen, font gxui.Font, txtc
 	}
 }
 
+func DrawElemLine(elem *st.Elem, cvs gxui.Canvas, pen gxui.Pen) {
+	Line(cvs, pen, int(elem.Enod[0].Pcoord[0]), int(elem.Enod[0].Pcoord[1]), int(elem.Enod[1].Pcoord[0]), int(elem.Enod[1].Pcoord[1]))
+}
