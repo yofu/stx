@@ -391,7 +391,20 @@ func NewWindow(driver gxui.Driver, theme gxui.Theme, homedir string) *Window {
 		if _, ok := stw.dlg.Focus().(gxui.TextBox); ok {
 			return
 		}
-		stw.dlg.SetFocus(stw.cline)
+		switch ev.Key {
+		default:
+			stw.dlg.SetFocus(stw.cline)
+			return
+		case gxui.KeyEscape:
+			stw.Deselect()
+		case gxui.KeyLeftShift, gxui.KeyRightShift, gxui.KeyLeftControl, gxui.KeyRightControl, gxui.KeyLeftAlt, gxui.KeyRightAlt:
+			return
+		case gxui.KeyA:
+			if ev.Modifier.Control() {
+				stw.SelectNotHidden()
+			}
+		}
+		stw.Redraw()
 	})
 
 	stw.SetCanvasSize()
