@@ -219,6 +219,7 @@ func (stw *Window) DrawFrameNode() gxui.Canvas {
 		return canvas
 	}
 	pen := gxui.CreatePen(1, gxui.White)
+	var brush gxui.Brush
 	font := stw.theme.DefaultFont()
 	stw.Frame.View.Set(1)
 	nodes := make([]*st.Node, len(stw.Frame.Nodes))
@@ -275,11 +276,12 @@ func (stw *Window) DrawFrameNode() gxui.Canvas {
 		nomv := stw.Frame.Show.NoMomentValue
 		stw.Frame.Show.NoMomentValue = false
 		pen = gxui.CreatePen(1, gxui.Green90)
+		brush = gxui.CreateBrush(OpaqueColor(gxui.Green90, SELECT_OPACITY))
 		for _, el := range stw.SelectElem {
 			if el == nil || el.IsHidden(stw.Frame.Show) {
 				continue
 			}
-			DrawElem(el, canvas, pen, font, gxui.White, true, stw.Frame.Show)
+			DrawElem(el, canvas, pen, brush, font, gxui.White, true, stw.Frame.Show)
 		}
 		stw.Frame.Show.NoMomentValue = nomv
 	}
@@ -297,6 +299,7 @@ func (stw *Window) DrawFrame() gxui.Canvas {
 		return canvas
 	}
 	pen := gxui.CreatePen(1, gxui.White)
+	var brush gxui.Brush
 	font := stw.theme.DefaultFont()
 	stw.Frame.View.Set(1)
 	nodes := make([]*st.Node, len(stw.Frame.Nodes))
@@ -336,24 +339,32 @@ func (stw *Window) DrawFrame() gxui.Canvas {
 				}
 			}
 			switch stw.Frame.Show.ColorMode {
+			default:
+				pen = gxui.WhitePen
+				brush = gxui.WhiteBrush
 			case st.ECOLOR_WHITE:
 				pen = gxui.WhitePen
+				brush = gxui.WhiteBrush
 			case st.ECOLOR_BLACK:
 				pen = gxui.DefaultPen
+				brush = gxui.DefaultBrush
 			case st.ECOLOR_SECT:
-				pen = Pen(el.Sect.Color, true)
+				pen = Pen(el.Sect.Color, false)
+				brush = Brush(el.Sect.Color, false)
 			case st.ECOLOR_RATE:
 				val, err := el.RateMax(stw.Frame.Show)
 				if err != nil {
-					pen = Pen(st.GREY_500, true)
+					pen = Pen(st.GREY_500, false)
+					brush = Brush(st.GREY_500, false)
 				} else {
-					pen = Pen(st.Rainbow(val, st.RateBoundary), true)
+					pen = Pen(st.Rainbow(val, st.RateBoundary), false)
+					brush = Brush(st.Rainbow(val, st.RateBoundary), false)
 				}
 			case st.ECOLOR_N:
 				if el.N(stw.Frame.Show.Period, 0) >= 0.0 {
-					pen = Pen(st.RainbowColor[0], true) // Compression: Blue
+					pen = Pen(st.RainbowColor[0], false) // Compression: Blue
 				} else {
-					pen = Pen(st.RainbowColor[6], true) // Tension: Red
+					pen = Pen(st.RainbowColor[6], false) // Tension: Red
 				}
 			case st.ECOLOR_STRONG:
 				Ix, err := el.Sect.Ix(0)
@@ -365,14 +376,14 @@ func (stw *Window) DrawFrame() gxui.Canvas {
 					pen = gxui.WhitePen
 				}
 				if Ix > Iy {
-					pen = Pen(st.RainbowColor[0], true) // Strong: Blue
+					pen = Pen(st.RainbowColor[0], false) // Strong: Blue
 				} else if Ix == Iy {
-					pen = Pen(st.RainbowColor[4], true) // Same: Yellow
+					pen = Pen(st.RainbowColor[4], false) // Same: Yellow
 				} else {
-					pen = Pen(st.RainbowColor[6], true) // Weak: Red
+					pen = Pen(st.RainbowColor[6], false) // Weak: Red
 				}
 			}
-			DrawElem(el, canvas, pen, font, gxui.White, false, stw.Frame.Show)
+			DrawElem(el, canvas, pen, brush, font, gxui.White, false, stw.Frame.Show)
 		}
 	}
 	if stw.SelectElem != nil {
@@ -383,18 +394,26 @@ func (stw *Window) DrawFrame() gxui.Canvas {
 				continue
 			}
 			switch stw.Frame.Show.ColorMode {
+			default:
+				pen = gxui.WhitePen
+				brush = gxui.WhiteBrush
 			case st.ECOLOR_WHITE:
 				pen = gxui.WhitePen
+				brush = gxui.WhiteBrush
 			case st.ECOLOR_BLACK:
 				pen = gxui.DefaultPen
+				brush = gxui.DefaultBrush
 			case st.ECOLOR_SECT:
 				pen = Pen(el.Sect.Color, true)
+				brush = Brush(el.Sect.Color, true)
 			case st.ECOLOR_RATE:
 				val, err := el.RateMax(stw.Frame.Show)
 				if err != nil {
 					pen = Pen(st.GREY_500, true)
+					brush = Brush(st.GREY_500, true)
 				} else {
 					pen = Pen(st.Rainbow(val, st.RateBoundary), true)
+					brush = Brush(st.Rainbow(val, st.RateBoundary), true)
 				}
 			case st.ECOLOR_N:
 				if el.N(stw.Frame.Show.Period, 0) >= 0.0 {
@@ -419,7 +438,7 @@ func (stw *Window) DrawFrame() gxui.Canvas {
 					pen = Pen(st.RainbowColor[6], true) // Weak: Red
 				}
 			}
-			DrawElem(el, canvas, pen, font, gxui.White, true, stw.Frame.Show)
+			DrawElem(el, canvas, pen, brush, font, gxui.White, true, stw.Frame.Show)
 		}
 		stw.Frame.Show.NoMomentValue = nomv
 	}
@@ -557,7 +576,7 @@ func FixFigure(cvs gxui.Canvas, x, y, size float64) {
 	Line(cvs, gxui.WhitePen, int(x+0.75*size), int(y), int(x+0.25*size), int(y+0.5*size))
 }
 
-func DrawElem(elem *st.Elem, cvs gxui.Canvas, pen gxui.Pen, font gxui.Font, txtcolor gxui.Color, selected bool, show *st.Show) {
+func DrawElem(elem *st.Elem, cvs gxui.Canvas, pen gxui.Pen, brush gxui.Brush, font gxui.Font, txtcolor gxui.Color, selected bool, show *st.Show) {
 	var ecap bytes.Buffer
 	var oncap bool
 	if show.ElemCaption&st.EC_NUM != 0 {
@@ -802,24 +821,6 @@ func DrawElem(elem *st.Elem, cvs gxui.Canvas, pen gxui.Pen, font gxui.Font, txtc
 		vers := make([][]int, elem.Enods)
 		for i, en := range elem.Enod {
 			vers[i] = []int{int(en.Pcoord[0]), int(en.Pcoord[1])}
-		}
-		var brush gxui.Brush
-		switch show.ColorMode {
-		default:
-			brush = gxui.WhiteBrush
-		case st.ECOLOR_WHITE:
-			brush = gxui.WhiteBrush
-		case st.ECOLOR_BLACK:
-			brush = gxui.DefaultBrush
-		case st.ECOLOR_SECT:
-			brush = Brush(elem.Sect.Color, selected)
-		case st.ECOLOR_RATE:
-			val, err := elem.RateMax(show)
-			if err != nil {
-				brush = Brush(st.GREY_500, selected)
-			} else {
-				brush = Brush(st.Rainbow(val, st.RateBoundary), selected)
-			}
 		}
 		Polygon(cvs, PlateEdgePen, brush, vers)
 		if elem.Wrect != nil && (elem.Wrect[0] != 0.0 || elem.Wrect[1] != 0.0) {
