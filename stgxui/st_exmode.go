@@ -3171,7 +3171,7 @@ func (stw *Window) excommand(command string, pipe bool) error {
 		}
 		af := stw.Frame.Arclms[per]
 		go func() {
-			err := af.Arclm201(otp, init, lap, safety, start)
+			err := af.Arclm201(otp, init, lap, safety, start, 1.0)
 			af.Endch <- err
 		}()
 		stw.CurrentLap("Calculating...", 0, lap)
