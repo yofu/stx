@@ -80,9 +80,6 @@ func get2nodes(stw *Window, f func(n *st.Node), fdel func()) {
 			// Snapping
 			n := stw.PickNode(int(ev.Point.X), int(ev.Point.Y))
 			if n != nil {
-				if stw.rubber != nil {
-					stw.rubber.Release()
-				}
 				stw.rubber = stw.driver.CreateCanvas(gxmath.Size{W: stw.CanvasSize[0], H: stw.CanvasSize[1]})
 				Circle(stw.rubber, RubberPenSnap, int(n.Pcoord[0]), int(n.Pcoord[1]), nodeSelectPixel)
 				stw.rubber.Complete()

@@ -2071,9 +2071,6 @@ func (stw *Window) MergeSelectElem(elems []*st.Elem, isshift bool) {
 func (stw *Window) SelectNodeMotion(ev gxui.MouseEvent) {
 	if stw.startX <= ev.Point.X {
 		selectDirection = SD_FROMLEFT
-		if stw.rubber != nil {
-			stw.rubber.Release()
-		}
 		stw.rubber = stw.driver.CreateCanvas(gxmath.Size{W: stw.CanvasSize[0], H: stw.CanvasSize[1]})
 		Rect(stw.rubber, RubberPenNode, RubberBrushNode, int(ev.Point.X), stw.startX, min(stw.startY, int(ev.Point.Y)), max(stw.startY, int(ev.Point.Y)))
 		stw.rubber.Complete()
@@ -2081,9 +2078,6 @@ func (stw *Window) SelectNodeMotion(ev gxui.MouseEvent) {
 		stw.endY = ev.Point.Y
 	} else {
 		selectDirection = SD_FROMRIGHT
-		if stw.rubber != nil {
-			stw.rubber.Release()
-		}
 		stw.rubber = stw.driver.CreateCanvas(gxmath.Size{W: stw.CanvasSize[0], H: stw.CanvasSize[1]})
 		Rect(stw.rubber, RubberPenNode, RubberBrushNode, stw.startX, int(ev.Point.X), min(stw.startY, int(ev.Point.Y)), max(stw.startY, int(ev.Point.Y)))
 		stw.rubber.Complete()
@@ -2095,9 +2089,6 @@ func (stw *Window) SelectNodeMotion(ev gxui.MouseEvent) {
 func (stw *Window) SelectElemMotion(ev gxui.MouseEvent) {
 	if stw.startX <= ev.Point.X {
 		selectDirection = SD_FROMLEFT
-		if stw.rubber != nil {
-			stw.rubber.Release()
-		}
 		stw.rubber = stw.driver.CreateCanvas(gxmath.Size{W: stw.CanvasSize[0], H: stw.CanvasSize[1]})
 		Rect(stw.rubber, RubberPenLeft, RubberBrushLeft, int(ev.Point.X), stw.startX, min(stw.startY, int(ev.Point.Y)), max(stw.startY, int(ev.Point.Y)))
 		stw.rubber.Complete()
@@ -2105,9 +2096,6 @@ func (stw *Window) SelectElemMotion(ev gxui.MouseEvent) {
 		stw.endY = ev.Point.Y
 	} else {
 		selectDirection = SD_FROMRIGHT
-		if stw.rubber != nil {
-			stw.rubber.Release()
-		}
 		stw.rubber = stw.driver.CreateCanvas(gxmath.Size{W: stw.CanvasSize[0], H: stw.CanvasSize[1]})
 		Rect(stw.rubber, RubberPenRight, RubberBrushRight, stw.startX, int(ev.Point.X), min(stw.startY, int(ev.Point.Y)), max(stw.startY, int(ev.Point.Y)))
 		stw.rubber.Complete()
@@ -2118,18 +2106,12 @@ func (stw *Window) SelectElemMotion(ev gxui.MouseEvent) {
 
 func (stw *Window) SelectElemFenceMotion(ev gxui.MouseEvent) {
 	if ev.Modifier.Control() {
-		if stw.rubber != nil {
-			stw.rubber.Release()
-		}
 		stw.rubber = stw.driver.CreateCanvas(gxmath.Size{W: stw.CanvasSize[0], H: stw.CanvasSize[1]})
 		Line(stw.rubber, RubberPenLeft, stw.startX, stw.startY, int(ev.Point.X), stw.startY)
 		stw.rubber.Complete()
 		stw.endX = ev.Point.X
 		stw.endY = stw.startY
 	} else {
-		if stw.rubber != nil {
-			stw.rubber.Release()
-		}
 		stw.rubber = stw.driver.CreateCanvas(gxmath.Size{W: stw.CanvasSize[0], H: stw.CanvasSize[1]})
 		Line(stw.rubber, RubberPenLeft, stw.startX, stw.startY, int(ev.Point.X), int(ev.Point.Y))
 		stw.rubber.Complete()
@@ -2139,9 +2121,6 @@ func (stw *Window) SelectElemFenceMotion(ev gxui.MouseEvent) {
 }
 
 func (stw *Window) TailLine(x, y int, ev gxui.MouseEvent) {
-	if stw.rubber != nil {
-		stw.rubber.Release()
-	}
 	stw.rubber = stw.driver.CreateCanvas(gxmath.Size{W: stw.CanvasSize[0], H: stw.CanvasSize[1]})
 	Line(stw.rubber, RubberPenLeft, x, y, int(ev.Point.X), int(ev.Point.Y))
 	stw.rubber.Complete()
@@ -2161,9 +2140,6 @@ func (stw *Window) TailPolygon(ns []*st.Node, ev gxui.MouseEvent) {
 		num++
 	}
 	coords[num] = []int{ev.Point.X, ev.Point.Y}
-	if stw.rubber != nil {
-		stw.rubber.Release()
-	}
 	Polygon(stw.rubber, RubberPenLeft, RubberBrushLeft, coords[:num+1])
 	stw.rubber.Complete()
 	stw.endX = ev.Point.X
@@ -2547,17 +2523,11 @@ func (stw *Window) DispOff(direction int) {
 
 
 func (stw *Window) RedrawNode() {
-	if stw.draw.Canvas() != nil {
-		stw.draw.Canvas().Release()
-	}
 	canvas := stw.DrawFrameNode()
 	stw.draw.SetCanvas(canvas)
 }
 
 func (stw *Window) Redraw() {
-	if stw.draw.Canvas() != nil {
-		stw.draw.Canvas().Release()
-	}
 	canvas := stw.DrawFrame()
 	stw.draw.SetCanvas(canvas)
 }
