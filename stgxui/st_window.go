@@ -288,10 +288,10 @@ func (stw *Window) initDrawAreaCallback() {
 					stw.SelectElemUp(ev)
 				}
 			}
+			stw.rubber = stw.driver.CreateCanvas(gxmath.Size{W: stw.CanvasSize[0], H: stw.CanvasSize[1]})
+			stw.rubber.Complete()
+			stw.Redraw()
 		}
-		stw.rubber = stw.driver.CreateCanvas(gxmath.Size{W: stw.CanvasSize[0], H: stw.CanvasSize[1]})
-		stw.rubber.Complete()
-		stw.Redraw()
 	})
 	stw.draw.OnMouseDown(func (ev gxui.MouseEvent) {
 		stw.StartSelection(ev)
