@@ -356,37 +356,24 @@ func NewWindow(driver gxui.Driver, theme gxui.Theme, homedir string) *Window {
 	stw.theme = theme
 	stw.CanvasSize = []int{1000, 1000}
 
-	sidedraw := theme.CreateSplitterLayout()
-	sidedraw.SetOrientation(gxui.Horizontal)
-
 	side := stw.sideBar()
 
 	stw.draw = theme.CreateImage()
 	stw.initDrawAreaCallback()
 
-	sidedraw.AddChild(side)
-	sidedraw.AddChild(stw.draw)
-	sidedraw.SetChildWeight(side, 0.2)
-	sidedraw.SetChildWeight(stw.draw, 0.8)
-
 	stw.initHistoryArea()
 	stw.initCommandLineArea()
 
-	vll := theme.CreateLinearLayout()
-	vll.SetDirection(gxui.TopToBottom)
-	vll.SetSizeMode(gxui.ExpandToContent)
-	vll.AddChild(stw.history)
-	vll.AddChild(stw.cline)
+	table := theme.CreateTableLayout()
+	table.SetGrid(20, 20)
 
-	vsp := theme.CreateSplitterLayout()
-	vsp.SetOrientation(gxui.Vertical)
-	vsp.AddChild(sidedraw)
-	vsp.AddChild(vll)
-	vsp.SetChildWeight(sidedraw, 0.8)
-	vsp.SetChildWeight(vll, 0.2)
+	table.SetChildAt(0, 0, 4, 16, side)
+	table.SetChildAt(4, 0, 16, 16, stw.draw)
+	table.SetChildAt(0, 16, 20, 3, stw.history)
+	table.SetChildAt(0, 19, 20, 1, stw.cline)
 
 	stw.dlg = theme.CreateWindow(1200, 900, "stx")
-	stw.dlg.AddChild(vsp)
+	stw.dlg.AddChild(table)
 	stw.dlg.OnClose(driver.Terminate)
 	stw.dlg.OnKeyDown(func (ev gxui.KeyboardEvent) {
 		if _, ok := stw.dlg.Focus().(gxui.TextBox); ok {
